@@ -5,6 +5,7 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.wahon.extension.ChapterInfo
 import com.wahon.extension.Filter
 import com.wahon.extension.MangaInfo
+import com.wahon.extension.PageInfo
 import com.wahon.shared.domain.model.LoadedSource
 import com.wahon.shared.domain.repository.ExtensionRuntimeRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +37,8 @@ class SourcesScreenModel(
                             sources = sortedSources,
                             selectedSourceId = null,
                             selectedMangaUrl = null,
+                            selectedChapterUrl = null,
+                            selectedChapterName = null,
                             feedQuery = "",
                             feedManga = emptyList(),
                             isLoadingFeed = false,
@@ -47,9 +50,9 @@ class SourcesScreenModel(
                             chapters = emptyList(),
                             isLoadingMangaDetails = false,
                             mangaDetailsError = null,
-                            loadingChapterUrls = emptySet(),
-                            chapterPageCounts = emptyMap(),
-                            chapterErrors = emptyMap(),
+                            chapterPages = emptyList(),
+                            isLoadingChapterPages = false,
+                            chapterPagesError = null,
                         )
                     }
                 }
@@ -81,6 +84,8 @@ class SourcesScreenModel(
             it.copy(
                 selectedSourceId = extensionId,
                 selectedMangaUrl = null,
+                selectedChapterUrl = null,
+                selectedChapterName = null,
                 feedQuery = "",
                 feedManga = emptyList(),
                 isLoadingFeed = false,
@@ -92,9 +97,9 @@ class SourcesScreenModel(
                 chapters = emptyList(),
                 isLoadingMangaDetails = false,
                 mangaDetailsError = null,
-                loadingChapterUrls = emptySet(),
-                chapterPageCounts = emptyMap(),
-                chapterErrors = emptyMap(),
+                chapterPages = emptyList(),
+                isLoadingChapterPages = false,
+                chapterPagesError = null,
             )
         }
         if (source.isRuntimeExecutable) {
@@ -107,6 +112,8 @@ class SourcesScreenModel(
             it.copy(
                 selectedSourceId = null,
                 selectedMangaUrl = null,
+                selectedChapterUrl = null,
+                selectedChapterName = null,
                 feedQuery = "",
                 feedManga = emptyList(),
                 isLoadingFeed = false,
@@ -118,9 +125,9 @@ class SourcesScreenModel(
                 chapters = emptyList(),
                 isLoadingMangaDetails = false,
                 mangaDetailsError = null,
-                loadingChapterUrls = emptySet(),
-                chapterPageCounts = emptyMap(),
-                chapterErrors = emptyMap(),
+                chapterPages = emptyList(),
+                isLoadingChapterPages = false,
+                chapterPagesError = null,
             )
         }
     }
@@ -196,13 +203,15 @@ class SourcesScreenModel(
         _state.update {
             it.copy(
                 selectedMangaUrl = mangaUrl,
+                selectedChapterUrl = null,
+                selectedChapterName = null,
                 mangaDetails = null,
                 chapters = emptyList(),
                 isLoadingMangaDetails = true,
                 mangaDetailsError = null,
-                loadingChapterUrls = emptySet(),
-                chapterPageCounts = emptyMap(),
-                chapterErrors = emptyMap(),
+                chapterPages = emptyList(),
+                isLoadingChapterPages = false,
+                chapterPagesError = null,
             )
         }
 
@@ -240,50 +249,66 @@ class SourcesScreenModel(
         _state.update {
             it.copy(
                 selectedMangaUrl = null,
+                selectedChapterUrl = null,
+                selectedChapterName = null,
                 mangaDetails = null,
                 chapters = emptyList(),
                 isLoadingMangaDetails = false,
                 mangaDetailsError = null,
-                loadingChapterUrls = emptySet(),
-                chapterPageCounts = emptyMap(),
-                chapterErrors = emptyMap(),
+                chapterPages = emptyList(),
+                isLoadingChapterPages = false,
+                chapterPagesError = null,
             )
         }
     }
 
-    fun loadChapterPages(chapterUrl: String) {
+    fun openChapter(chapter: ChapterInfo) {
         val sourceId = _state.value.selectedSourceId ?: return
-        if (_state.value.loadingChapterUrls.contains(chapterUrl)) return
-
-        _state.update { current ->
-            current.copy(
-                loadingChapterUrls = current.loadingChapterUrls + chapterUrl,
-                chapterErrors = current.chapterErrors - chapterUrl,
+        _state.update {
+            it.copy(
+                selectedChapterUrl = chapter.url,
+                selectedChapterName = chapter.name,
+                chapterPages = emptyList(),
+                isLoadingChapterPages = true,
+                chapterPagesError = null,
             )
         }
 
         screenModelScope.launch {
             extensionRuntimeRepository.getPageList(
                 extensionId = sourceId,
-                chapterUrl = chapterUrl,
+                chapterUrl = chapter.url,
             ).onSuccess { pages ->
                 _state.update { current ->
+                    if (current.selectedChapterUrl != chapter.url) return@update current
                     current.copy(
-                        loadingChapterUrls = current.loadingChapterUrls - chapterUrl,
-                        chapterPageCounts = current.chapterPageCounts + (chapterUrl to pages.size),
-                        chapterErrors = current.chapterErrors - chapterUrl,
+                        chapterPages = pages,
+                        isLoadingChapterPages = false,
+                        chapterPagesError = null,
                     )
                 }
             }.onFailure { error ->
                 _state.update { current ->
+                    if (current.selectedChapterUrl != chapter.url) return@update current
                     current.copy(
-                        loadingChapterUrls = current.loadingChapterUrls - chapterUrl,
-                        chapterErrors = current.chapterErrors + (
-                            chapterUrl to (error.message ?: "Failed to load pages")
-                        ),
+                        chapterPages = emptyList(),
+                        isLoadingChapterPages = false,
+                        chapterPagesError = error.message ?: "Failed to load chapter pages",
                     )
                 }
             }
+        }
+    }
+
+    fun closeChapterReader() {
+        _state.update {
+            it.copy(
+                selectedChapterUrl = null,
+                selectedChapterName = null,
+                chapterPages = emptyList(),
+                isLoadingChapterPages = false,
+                chapterPagesError = null,
+            )
         }
     }
 
@@ -369,6 +394,8 @@ data class SourcesUiState(
     val error: String? = null,
     val selectedSourceId: String? = null,
     val selectedMangaUrl: String? = null,
+    val selectedChapterUrl: String? = null,
+    val selectedChapterName: String? = null,
     val feedQuery: String = "",
     val feedManga: List<MangaInfo> = emptyList(),
     val isLoadingFeed: Boolean = false,
@@ -380,9 +407,9 @@ data class SourcesUiState(
     val chapters: List<ChapterInfo> = emptyList(),
     val isLoadingMangaDetails: Boolean = false,
     val mangaDetailsError: String? = null,
-    val loadingChapterUrls: Set<String> = emptySet(),
-    val chapterPageCounts: Map<String, Int> = emptyMap(),
-    val chapterErrors: Map<String, String> = emptyMap(),
+    val chapterPages: List<PageInfo> = emptyList(),
+    val isLoadingChapterPages: Boolean = false,
+    val chapterPagesError: String? = null,
 ) {
     val selectedSource: LoadedSource?
         get() = selectedSourceId?.let { selectedId ->

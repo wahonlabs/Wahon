@@ -23,11 +23,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.wahon.extension.ChapterInfo
 import com.wahon.extension.MangaInfo
+import com.wahon.extension.PageInfo
 import com.wahon.shared.domain.model.LoadedSource
 import com.wahon.shared.domain.model.SourceRuntimeKind
 
@@ -46,25 +48,37 @@ fun SourcesScreen(
             }
 
             selectedSource != null -> {
-                if (state.selectedMangaUrl != null) {
-                    MangaDetailsContent(
-                        source = selectedSource,
-                        state = state,
-                        onBack = screenModel::closeMangaDetails,
-                        onLoadPages = screenModel::loadChapterPages,
-                    )
-                } else {
-                    SourceCatalog(
-                        source = selectedSource,
-                        state = state,
-                        onBack = screenModel::backToSourceList,
-                        onSearchQueryChange = screenModel::onFeedQueryChange,
-                        onSearch = screenModel::runSearch,
-                        onClearSearch = screenModel::clearSearch,
-                        onRetry = screenModel::retryFeed,
-                        onLoadMore = screenModel::loadNextFeedPage,
-                        onOpenManga = { manga -> screenModel.openManga(manga.url) },
-                    )
+                when {
+                    state.selectedChapterUrl != null -> {
+                        ChapterReaderContent(
+                            source = selectedSource,
+                            state = state,
+                            onBack = screenModel::closeChapterReader,
+                        )
+                    }
+
+                    state.selectedMangaUrl != null -> {
+                        MangaDetailsContent(
+                            source = selectedSource,
+                            state = state,
+                            onBack = screenModel::closeMangaDetails,
+                            onOpenChapter = screenModel::openChapter,
+                        )
+                    }
+
+                    else -> {
+                        SourceCatalog(
+                            source = selectedSource,
+                            state = state,
+                            onBack = screenModel::backToSourceList,
+                            onSearchQueryChange = screenModel::onFeedQueryChange,
+                            onSearch = screenModel::runSearch,
+                            onClearSearch = screenModel::clearSearch,
+                            onRetry = screenModel::retryFeed,
+                            onLoadMore = screenModel::loadNextFeedPage,
+                            onOpenManga = { manga -> screenModel.openManga(manga.url) },
+                        )
+                    }
                 }
             }
 
@@ -409,7 +423,7 @@ private fun MangaDetailsContent(
     source: LoadedSource,
     state: SourcesUiState,
     onBack: () -> Unit,
-    onLoadPages: (String) -> Unit,
+    onOpenChapter: (ChapterInfo) -> Unit,
 ) {
     val manga = state.mangaDetails
 
@@ -486,10 +500,7 @@ private fun MangaDetailsContent(
             ) { chapter ->
                 ChapterItem(
                     chapter = chapter,
-                    isLoadingPages = state.loadingChapterUrls.contains(chapter.url),
-                    pagesCount = state.chapterPageCounts[chapter.url],
-                    pagesError = state.chapterErrors[chapter.url],
-                    onLoadPages = { onLoadPages(chapter.url) },
+                    onRead = { onOpenChapter(chapter) },
                 )
             }
         }
@@ -499,10 +510,7 @@ private fun MangaDetailsContent(
 @Composable
 private fun ChapterItem(
     chapter: ChapterInfo,
-    isLoadingPages: Boolean,
-    pagesCount: Int?,
-    pagesError: String?,
-    onLoadPages: () -> Unit,
+    onRead: () -> Unit,
 ) {
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -525,29 +533,111 @@ private fun ChapterItem(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            OutlinedButton(onClick = onRead) {
+                Text("Read")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChapterReaderContent(
+    source: LoadedSource,
+    state: SourcesUiState,
+    onBack: () -> Unit,
+) {
+    val chapterName = state.selectedChapterName
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedButton(onClick = onBack) {
+            Text("Back to chapters")
+        }
+        Text(
+            text = chapterName ?: "Chapter",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+        Text(
+            text = "Source: ${source.name}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        )
+
+        if (state.isLoadingChapterPages) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
             ) {
-                OutlinedButton(onClick = onLoadPages, enabled = !isLoadingPages) {
-                    Text(if (isLoadingPages) "Loading..." else "Fetch pages")
-                }
-                if (pagesCount != null) {
-                    Text(
-                        text = "Pages: $pagesCount",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
+                CircularProgressIndicator()
             }
-            if (!pagesError.isNullOrBlank()) {
-                Text(
-                    text = pagesError,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
+            return
+        }
+
+        val pagesError = state.chapterPagesError
+        if (!pagesError.isNullOrBlank()) {
+            Text(
+                text = pagesError,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+            return
+        }
+
+        if (state.chapterPages.isEmpty()) {
+            Text(
+                text = "No pages returned for chapter.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+            return
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(
+                items = state.chapterPages,
+                key = { page -> page.index },
+            ) { page ->
+                ChapterPageItem(page = page)
             }
+        }
+    }
+}
+
+@Composable
+private fun ChapterPageItem(page: PageInfo) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 1.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = "Page ${page.index + 1}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
+            AsyncImage(
+                model = page.imageUrl,
+                contentDescription = "Page ${page.index + 1}",
+                modifier = Modifier.fillMaxWidth(),
+                contentScale = ContentScale.FillWidth,
+            )
         }
     }
 }
