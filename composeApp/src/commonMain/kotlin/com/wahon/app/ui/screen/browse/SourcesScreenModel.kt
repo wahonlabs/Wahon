@@ -11,6 +11,8 @@ import com.wahon.shared.domain.model.LoadedSource
 import com.wahon.shared.domain.model.MangaLastRead
 import com.wahon.shared.domain.repository.ExtensionRuntimeRepository
 import com.wahon.shared.domain.repository.ReaderProgressRepository
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +24,8 @@ class SourcesScreenModel(
     private val extensionRuntimeRepository: ExtensionRuntimeRepository,
     private val readerProgressRepository: ReaderProgressRepository,
 ) : ScreenModel {
+
+    private var chapterProgressAutosaveJob: Job? = null
 
     private val _state = MutableStateFlow(SourcesUiState())
     val state: StateFlow<SourcesUiState> = _state.asStateFlow()
@@ -61,6 +65,7 @@ class SourcesScreenModel(
                             chapterPagesError = null,
                             chapterResumePage = 0,
                             currentVisiblePage = 0,
+                            lastPersistedVisiblePage = 0,
                         )
                     }
                 }
@@ -112,6 +117,7 @@ class SourcesScreenModel(
                 chapterPagesError = null,
                 chapterResumePage = 0,
                 currentVisiblePage = 0,
+                lastPersistedVisiblePage = 0,
             )
         }
         if (source.isRuntimeExecutable) {
@@ -144,6 +150,7 @@ class SourcesScreenModel(
                 chapterPagesError = null,
                 chapterResumePage = 0,
                 currentVisiblePage = 0,
+                lastPersistedVisiblePage = 0,
             )
         }
     }
@@ -232,6 +239,7 @@ class SourcesScreenModel(
                 chapterPagesError = null,
                 chapterResumePage = 0,
                 currentVisiblePage = 0,
+                lastPersistedVisiblePage = 0,
             )
         }
 
@@ -297,12 +305,15 @@ class SourcesScreenModel(
                 chapterPagesError = null,
                 chapterResumePage = 0,
                 currentVisiblePage = 0,
+                lastPersistedVisiblePage = 0,
             )
         }
     }
 
     fun openChapter(chapter: ChapterInfo) {
         val sourceId = _state.value.selectedSourceId ?: return
+        chapterProgressAutosaveJob?.cancel()
+        chapterProgressAutosaveJob = null
 
         screenModelScope.launch {
             val savedProgress = _state.value.chapterProgressByUrl[chapter.url]
@@ -327,6 +338,7 @@ class SourcesScreenModel(
                     chapterPagesError = null,
                     chapterResumePage = resumePage,
                     currentVisiblePage = resumePage,
+                    lastPersistedVisiblePage = resumePage,
                 )
             }
 
@@ -343,6 +355,7 @@ class SourcesScreenModel(
                         chapterPagesError = null,
                         chapterResumePage = normalizedResume,
                         currentVisiblePage = normalizedResume,
+                        lastPersistedVisiblePage = normalizedResume,
                     )
                 }
             }.onFailure { error ->
@@ -359,15 +372,26 @@ class SourcesScreenModel(
     }
 
     fun onChapterVisiblePageChanged(pageIndex: Int) {
+        var pageChanged = false
         _state.update { current ->
             if (current.selectedChapterUrl == null) return@update current
             val normalized = pageIndex.coerceAtLeast(0)
-            if (current.currentVisiblePage == normalized) current else current.copy(currentVisiblePage = normalized)
+            if (current.currentVisiblePage == normalized) {
+                current
+            } else {
+                pageChanged = true
+                current.copy(currentVisiblePage = normalized)
+            }
+        }
+        if (pageChanged) {
+            scheduleChapterProgressAutosave()
         }
     }
 
     fun closeChapterReader() {
         val snapshot = _state.value
+        chapterProgressAutosaveJob?.cancel()
+        chapterProgressAutosaveJob = null
         screenModelScope.launch {
             persistChapterProgress(snapshot)
         }
@@ -381,7 +405,20 @@ class SourcesScreenModel(
                 chapterPagesError = null,
                 chapterResumePage = 0,
                 currentVisiblePage = 0,
+                lastPersistedVisiblePage = 0,
             )
+        }
+    }
+
+    private fun scheduleChapterProgressAutosave() {
+        val snapshot = _state.value
+        if (snapshot.selectedChapterUrl == null || snapshot.chapterPages.isEmpty()) return
+        if (snapshot.currentVisiblePage == snapshot.lastPersistedVisiblePage) return
+
+        chapterProgressAutosaveJob?.cancel()
+        chapterProgressAutosaveJob = screenModelScope.launch {
+            delay(CHAPTER_PROGRESS_AUTOSAVE_DEBOUNCE_MS)
+            persistChapterProgress(_state.value)
         }
     }
 
@@ -395,6 +432,14 @@ class SourcesScreenModel(
 
         val clampedPage = snapshot.currentVisiblePage.coerceIn(0, totalPages - 1)
         val completed = clampedPage >= totalPages - 1
+        val existingProgress = snapshot.chapterProgressByUrl[chapterUrl]
+        if (existingProgress != null &&
+            existingProgress.lastPageRead == clampedPage &&
+            existingProgress.totalPages == totalPages &&
+            existingProgress.completed == completed
+        ) {
+            return
+        }
 
         readerProgressRepository.saveChapterProgress(
             sourceId = sourceId,
@@ -423,6 +468,11 @@ class SourcesScreenModel(
                     current.chapterProgressByUrl + (chapterUrl to refreshedProgress)
                 },
                 mangaLastRead = refreshedLastRead ?: current.mangaLastRead,
+                lastPersistedVisiblePage = if (current.selectedChapterUrl == chapterUrl) {
+                    clampedPage
+                } else {
+                    current.lastPersistedVisiblePage
+                },
             )
         }
     }
@@ -529,6 +579,7 @@ data class SourcesUiState(
     val chapterPagesError: String? = null,
     val chapterResumePage: Int = 0,
     val currentVisiblePage: Int = 0,
+    val lastPersistedVisiblePage: Int = 0,
 ) {
     val selectedSource: LoadedSource?
         get() = selectedSourceId?.let { selectedId ->
@@ -538,3 +589,5 @@ data class SourcesUiState(
     val isEmpty: Boolean
         get() = !isReloading && sources.isEmpty()
 }
+
+private const val CHAPTER_PROGRESS_AUTOSAVE_DEBOUNCE_MS = 1_000L
