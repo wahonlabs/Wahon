@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.wahon.extension.ChapterInfo
 import com.wahon.extension.MangaInfo
 import com.wahon.shared.domain.model.LoadedSource
 import com.wahon.shared.domain.model.SourceRuntimeKind
@@ -44,13 +46,26 @@ fun SourcesScreen(
             }
 
             selectedSource != null -> {
-                SourceCatalog(
-                    source = selectedSource,
-                    state = state,
-                    onBack = screenModel::backToSourceList,
-                    onRetry = screenModel::retryCurrentSource,
-                    onLoadMore = screenModel::loadNextPopularPage,
-                )
+                if (state.selectedMangaUrl != null) {
+                    MangaDetailsContent(
+                        source = selectedSource,
+                        state = state,
+                        onBack = screenModel::closeMangaDetails,
+                        onLoadPages = screenModel::loadChapterPages,
+                    )
+                } else {
+                    SourceCatalog(
+                        source = selectedSource,
+                        state = state,
+                        onBack = screenModel::backToSourceList,
+                        onSearchQueryChange = screenModel::onFeedQueryChange,
+                        onSearch = screenModel::runSearch,
+                        onClearSearch = screenModel::clearSearch,
+                        onRetry = screenModel::retryFeed,
+                        onLoadMore = screenModel::loadNextFeedPage,
+                        onOpenManga = { manga -> screenModel.openManga(manga.url) },
+                    )
+                }
             }
 
             state.isEmpty -> {
@@ -185,8 +200,12 @@ private fun SourceCatalog(
     source: LoadedSource,
     state: SourcesUiState,
     onBack: () -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onClearSearch: () -> Unit,
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
+    onOpenManga: (MangaInfo) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -220,10 +239,47 @@ private fun SourceCatalog(
             return
         }
 
-        val popularError = state.popularError
-        if (!popularError.isNullOrBlank()) {
+        OutlinedTextField(
+            value = state.feedQuery,
+            onValueChange = onSearchQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Search in source") },
+            placeholder = { Text("e.g. one piece") },
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = onSearch,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Search")
+            }
+            OutlinedButton(
+                onClick = onClearSearch,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Popular")
+            }
+        }
+
+        val modeLabel = when (state.feedMode) {
+            SourceFeedMode.POPULAR -> "Popular"
+            SourceFeedMode.SEARCH -> "Search"
+        }
+        Text(
+            text = "$modeLabel page: ${if (state.feedPage == 0) 1 else state.feedPage}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        val feedError = state.feedError
+        if (!feedError.isNullOrBlank()) {
             Text(
-                text = popularError,
+                text = feedError,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -232,7 +288,7 @@ private fun SourceCatalog(
             }
         }
 
-        if (state.isLoadingPopular && state.popularManga.isEmpty()) {
+        if (state.isLoadingFeed && state.feedManga.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
@@ -242,15 +298,12 @@ private fun SourceCatalog(
             return
         }
 
-        if (state.popularManga.isEmpty()) {
+        if (state.feedManga.isEmpty()) {
             Text(
-                text = "No popular manga returned by this source.",
+                text = "No manga returned by this source.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedButton(onClick = onRetry) {
-                Text("Reload popular")
-            }
             return
         }
 
@@ -259,16 +312,17 @@ private fun SourceCatalog(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(
-                items = state.popularManga,
+                items = state.feedManga,
                 key = { manga -> manga.url },
             ) { manga ->
                 MangaListItem(
                     manga = manga,
+                    onOpen = { onOpenManga(manga) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            if (state.isLoadingPopular) {
-                item(key = "popular_loading_more") {
+            if (state.isLoadingFeed) {
+                item(key = "feed_loading_more") {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -279,8 +333,8 @@ private fun SourceCatalog(
                     }
                 }
             }
-            if (state.hasNextPopularPage && !state.isLoadingPopular) {
-                item(key = "popular_load_more") {
+            if (state.hasNextFeedPage && !state.isLoadingFeed) {
+                item(key = "feed_load_more") {
                     Button(
                         onClick = onLoadMore,
                         modifier = Modifier
@@ -298,6 +352,7 @@ private fun SourceCatalog(
 @Composable
 private fun MangaListItem(
     manga: MangaInfo,
+    onOpen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -341,6 +396,157 @@ private fun MangaListItem(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+            OutlinedButton(onClick = onOpen) {
+                Text("Details")
+            }
+        }
+    }
+}
+
+@Composable
+private fun MangaDetailsContent(
+    source: LoadedSource,
+    state: SourcesUiState,
+    onBack: () -> Unit,
+    onLoadPages: (String) -> Unit,
+) {
+    val manga = state.mangaDetails
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedButton(onClick = onBack) {
+            Text("Back to list")
+        }
+
+        if (state.isLoadingMangaDetails && manga == null) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+            return
+        }
+
+        val errorText = state.mangaDetailsError
+        if (!errorText.isNullOrBlank()) {
+            Text(
+                text = errorText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        if (manga != null) {
+            Text(
+                text = manga.title,
+                style = MaterialTheme.typography.titleLarge,
+            )
+            Text(
+                text = "Source: ${source.name}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (manga.description.isNotBlank()) {
+                Text(
+                    text = manga.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 5,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        if (state.chapters.isEmpty()) {
+            Text(
+                text = "No chapters returned.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return
+        }
+
+        Text(
+            text = "Chapters: ${state.chapters.size}",
+            style = MaterialTheme.typography.titleMedium,
+        )
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(
+                items = state.chapters,
+                key = { chapter -> chapter.url },
+            ) { chapter ->
+                ChapterItem(
+                    chapter = chapter,
+                    isLoadingPages = state.loadingChapterUrls.contains(chapter.url),
+                    pagesCount = state.chapterPageCounts[chapter.url],
+                    pagesError = state.chapterErrors[chapter.url],
+                    onLoadPages = { onLoadPages(chapter.url) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChapterItem(
+    chapter: ChapterInfo,
+    isLoadingPages: Boolean,
+    pagesCount: Int?,
+    pagesError: String?,
+    onLoadPages: () -> Unit,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        tonalElevation = 1.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = chapter.name,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Chapter #${chapter.chapterNumber}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(onClick = onLoadPages, enabled = !isLoadingPages) {
+                    Text(if (isLoadingPages) "Loading..." else "Fetch pages")
+                }
+                if (pagesCount != null) {
+                    Text(
+                        text = "Pages: $pagesCount",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            if (!pagesError.isNullOrBlank()) {
+                Text(
+                    text = pagesError,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
     }

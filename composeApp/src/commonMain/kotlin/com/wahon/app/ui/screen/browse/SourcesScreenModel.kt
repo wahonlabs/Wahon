@@ -2,6 +2,8 @@ package com.wahon.app.ui.screen.browse
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.wahon.extension.ChapterInfo
+import com.wahon.extension.Filter
 import com.wahon.extension.MangaInfo
 import com.wahon.shared.domain.model.LoadedSource
 import com.wahon.shared.domain.repository.ExtensionRuntimeRepository
@@ -33,11 +35,21 @@ class SourcesScreenModel(
                         current.copy(
                             sources = sortedSources,
                             selectedSourceId = null,
-                            popularManga = emptyList(),
-                            isLoadingPopular = false,
-                            popularPage = 0,
-                            hasNextPopularPage = false,
-                            popularError = null,
+                            selectedMangaUrl = null,
+                            feedQuery = "",
+                            feedManga = emptyList(),
+                            isLoadingFeed = false,
+                            feedPage = 0,
+                            hasNextFeedPage = false,
+                            feedError = null,
+                            feedMode = SourceFeedMode.POPULAR,
+                            mangaDetails = null,
+                            chapters = emptyList(),
+                            isLoadingMangaDetails = false,
+                            mangaDetailsError = null,
+                            loadingChapterUrls = emptySet(),
+                            chapterPageCounts = emptyMap(),
+                            chapterErrors = emptyMap(),
                         )
                     }
                 }
@@ -68,15 +80,25 @@ class SourcesScreenModel(
         _state.update {
             it.copy(
                 selectedSourceId = extensionId,
-                popularManga = emptyList(),
-                isLoadingPopular = false,
-                popularPage = 0,
-                hasNextPopularPage = false,
-                popularError = if (source.isRuntimeExecutable) null else source.runtimeMessage,
+                selectedMangaUrl = null,
+                feedQuery = "",
+                feedManga = emptyList(),
+                isLoadingFeed = false,
+                feedPage = 0,
+                hasNextFeedPage = false,
+                feedError = if (source.isRuntimeExecutable) null else source.runtimeMessage,
+                feedMode = SourceFeedMode.POPULAR,
+                mangaDetails = null,
+                chapters = emptyList(),
+                isLoadingMangaDetails = false,
+                mangaDetailsError = null,
+                loadingChapterUrls = emptySet(),
+                chapterPageCounts = emptyMap(),
+                chapterErrors = emptyMap(),
             )
         }
         if (source.isRuntimeExecutable) {
-            loadPopularPage(page = 1, append = false)
+            loadFeedPage(page = 1, append = false)
         }
     }
 
@@ -84,85 +106,261 @@ class SourcesScreenModel(
         _state.update {
             it.copy(
                 selectedSourceId = null,
-                popularManga = emptyList(),
-                isLoadingPopular = false,
-                popularPage = 0,
-                hasNextPopularPage = false,
-                popularError = null,
+                selectedMangaUrl = null,
+                feedQuery = "",
+                feedManga = emptyList(),
+                isLoadingFeed = false,
+                feedPage = 0,
+                hasNextFeedPage = false,
+                feedError = null,
+                feedMode = SourceFeedMode.POPULAR,
+                mangaDetails = null,
+                chapters = emptyList(),
+                isLoadingMangaDetails = false,
+                mangaDetailsError = null,
+                loadingChapterUrls = emptySet(),
+                chapterPageCounts = emptyMap(),
+                chapterErrors = emptyMap(),
             )
         }
     }
 
-    fun retryCurrentSource() {
+    fun onFeedQueryChange(query: String) {
+        _state.update { it.copy(feedQuery = query) }
+    }
+
+    fun runSearch() {
         val current = _state.value
         val selectedSource = current.selectedSource ?: return
         if (!selectedSource.isRuntimeExecutable) return
-        loadPopularPage(page = 1, append = false)
-    }
 
-    fun loadNextPopularPage() {
-        val current = _state.value
-        val selectedSource = current.selectedSource ?: return
-        if (!selectedSource.isRuntimeExecutable || current.isLoadingPopular || !current.hasNextPopularPage) {
+        val query = current.feedQuery.trim()
+        if (query.isEmpty()) {
+            _state.update {
+                it.copy(
+                    feedMode = SourceFeedMode.POPULAR,
+                    feedManga = emptyList(),
+                    feedPage = 0,
+                    hasNextFeedPage = false,
+                    feedError = null,
+                )
+            }
+            loadFeedPage(page = 1, append = false)
             return
         }
-        loadPopularPage(page = current.popularPage + 1, append = true)
+
+        _state.update {
+            it.copy(
+                feedMode = SourceFeedMode.SEARCH,
+                feedManga = emptyList(),
+                feedPage = 0,
+                hasNextFeedPage = false,
+                feedError = null,
+            )
+        }
+        loadFeedPage(page = 1, append = false)
     }
 
-    private fun loadPopularPage(
+    fun clearSearch() {
+        _state.update {
+            it.copy(
+                feedQuery = "",
+                feedMode = SourceFeedMode.POPULAR,
+                feedManga = emptyList(),
+                feedPage = 0,
+                hasNextFeedPage = false,
+                feedError = null,
+            )
+        }
+        loadFeedPage(page = 1, append = false)
+    }
+
+    fun retryFeed() {
+        val current = _state.value
+        val selectedSource = current.selectedSource ?: return
+        if (!selectedSource.isRuntimeExecutable) return
+        loadFeedPage(page = 1, append = false)
+    }
+
+    fun loadNextFeedPage() {
+        val current = _state.value
+        val selectedSource = current.selectedSource ?: return
+        if (!selectedSource.isRuntimeExecutable || current.isLoadingFeed || !current.hasNextFeedPage) {
+            return
+        }
+        loadFeedPage(page = current.feedPage + 1, append = true)
+    }
+
+    fun openManga(mangaUrl: String) {
+        val sourceId = _state.value.selectedSourceId ?: return
+        _state.update {
+            it.copy(
+                selectedMangaUrl = mangaUrl,
+                mangaDetails = null,
+                chapters = emptyList(),
+                isLoadingMangaDetails = true,
+                mangaDetailsError = null,
+                loadingChapterUrls = emptySet(),
+                chapterPageCounts = emptyMap(),
+                chapterErrors = emptyMap(),
+            )
+        }
+
+        screenModelScope.launch {
+            val detailsResult = extensionRuntimeRepository.getMangaDetails(
+                extensionId = sourceId,
+                mangaUrl = mangaUrl,
+            )
+            val chaptersResult = extensionRuntimeRepository.getChapterList(
+                extensionId = sourceId,
+                mangaUrl = mangaUrl,
+            )
+
+            _state.update { current ->
+                if (current.selectedMangaUrl != mangaUrl) return@update current
+
+                val details = detailsResult.getOrNull()
+                val chapters = chaptersResult.getOrNull().orEmpty()
+                val errors = buildList {
+                    detailsResult.exceptionOrNull()?.message?.let { add(it) }
+                    chaptersResult.exceptionOrNull()?.message?.let { add(it) }
+                }
+
+                current.copy(
+                    mangaDetails = details,
+                    chapters = chapters,
+                    isLoadingMangaDetails = false,
+                    mangaDetailsError = if (errors.isEmpty()) null else errors.joinToString(separator = "\n"),
+                )
+            }
+        }
+    }
+
+    fun closeMangaDetails() {
+        _state.update {
+            it.copy(
+                selectedMangaUrl = null,
+                mangaDetails = null,
+                chapters = emptyList(),
+                isLoadingMangaDetails = false,
+                mangaDetailsError = null,
+                loadingChapterUrls = emptySet(),
+                chapterPageCounts = emptyMap(),
+                chapterErrors = emptyMap(),
+            )
+        }
+    }
+
+    fun loadChapterPages(chapterUrl: String) {
+        val sourceId = _state.value.selectedSourceId ?: return
+        if (_state.value.loadingChapterUrls.contains(chapterUrl)) return
+
+        _state.update { current ->
+            current.copy(
+                loadingChapterUrls = current.loadingChapterUrls + chapterUrl,
+                chapterErrors = current.chapterErrors - chapterUrl,
+            )
+        }
+
+        screenModelScope.launch {
+            extensionRuntimeRepository.getPageList(
+                extensionId = sourceId,
+                chapterUrl = chapterUrl,
+            ).onSuccess { pages ->
+                _state.update { current ->
+                    current.copy(
+                        loadingChapterUrls = current.loadingChapterUrls - chapterUrl,
+                        chapterPageCounts = current.chapterPageCounts + (chapterUrl to pages.size),
+                        chapterErrors = current.chapterErrors - chapterUrl,
+                    )
+                }
+            }.onFailure { error ->
+                _state.update { current ->
+                    current.copy(
+                        loadingChapterUrls = current.loadingChapterUrls - chapterUrl,
+                        chapterErrors = current.chapterErrors + (
+                            chapterUrl to (error.message ?: "Failed to load pages")
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun loadFeedPage(
         page: Int,
         append: Boolean,
     ) {
         val sourceId = _state.value.selectedSourceId ?: return
-        if (_state.value.isLoadingPopular) return
+        if (_state.value.isLoadingFeed) return
+
+        val mode = _state.value.feedMode
+        val query = _state.value.feedQuery.trim()
 
         _state.update { current ->
             if (!append) {
                 current.copy(
-                    isLoadingPopular = true,
-                    popularManga = emptyList(),
-                    popularError = null,
-                    popularPage = 0,
-                    hasNextPopularPage = false,
+                    isLoadingFeed = true,
+                    feedManga = emptyList(),
+                    feedError = null,
+                    feedPage = 0,
+                    hasNextFeedPage = false,
                 )
             } else {
                 current.copy(
-                    isLoadingPopular = true,
-                    popularError = null,
+                    isLoadingFeed = true,
+                    feedError = null,
                 )
             }
         }
 
         screenModelScope.launch {
-            extensionRuntimeRepository.getPopularManga(sourceId, page)
-                .onSuccess { mangaPage ->
-                    _state.update { current ->
-                        if (current.selectedSourceId != sourceId) return@update current
-                        val merged = if (append) {
-                            (current.popularManga + mangaPage.manga).distinctBy { it.url }
-                        } else {
-                            mangaPage.manga
-                        }
-                        current.copy(
-                            isLoadingPopular = false,
-                            popularManga = merged,
-                            popularPage = page,
-                            hasNextPopularPage = mangaPage.hasNextPage,
-                            popularError = null,
-                        )
-                    }
+            val result = when (mode) {
+                SourceFeedMode.POPULAR -> {
+                    extensionRuntimeRepository.getPopularManga(sourceId, page)
                 }
-                .onFailure { error ->
-                    _state.update { current ->
-                        if (current.selectedSourceId != sourceId) return@update current
-                        current.copy(
-                            isLoadingPopular = false,
-                            popularError = error.message ?: "Failed to load popular manga",
-                        )
-                    }
+                SourceFeedMode.SEARCH -> {
+                    extensionRuntimeRepository.searchManga(
+                        extensionId = sourceId,
+                        query = query,
+                        page = page,
+                        filters = emptyList<Filter>(),
+                    )
                 }
+            }
+
+            result.onSuccess { mangaPage ->
+                _state.update { current ->
+                    if (current.selectedSourceId != sourceId) return@update current
+                    val merged = if (append) {
+                        (current.feedManga + mangaPage.manga).distinctBy { it.url }
+                    } else {
+                        mangaPage.manga
+                    }
+                    current.copy(
+                        isLoadingFeed = false,
+                        feedManga = merged,
+                        feedPage = page,
+                        hasNextFeedPage = mangaPage.hasNextPage,
+                        feedError = null,
+                    )
+                }
+            }.onFailure { error ->
+                _state.update { current ->
+                    if (current.selectedSourceId != sourceId) return@update current
+                    current.copy(
+                        isLoadingFeed = false,
+                        feedError = error.message ?: "Failed to load feed",
+                    )
+                }
+            }
         }
     }
+}
+
+enum class SourceFeedMode {
+    POPULAR,
+    SEARCH,
 }
 
 data class SourcesUiState(
@@ -170,11 +368,21 @@ data class SourcesUiState(
     val sources: List<LoadedSource> = emptyList(),
     val error: String? = null,
     val selectedSourceId: String? = null,
-    val popularManga: List<MangaInfo> = emptyList(),
-    val isLoadingPopular: Boolean = false,
-    val popularPage: Int = 0,
-    val hasNextPopularPage: Boolean = false,
-    val popularError: String? = null,
+    val selectedMangaUrl: String? = null,
+    val feedQuery: String = "",
+    val feedManga: List<MangaInfo> = emptyList(),
+    val isLoadingFeed: Boolean = false,
+    val feedPage: Int = 0,
+    val hasNextFeedPage: Boolean = false,
+    val feedError: String? = null,
+    val feedMode: SourceFeedMode = SourceFeedMode.POPULAR,
+    val mangaDetails: MangaInfo? = null,
+    val chapters: List<ChapterInfo> = emptyList(),
+    val isLoadingMangaDetails: Boolean = false,
+    val mangaDetailsError: String? = null,
+    val loadingChapterUrls: Set<String> = emptySet(),
+    val chapterPageCounts: Map<String, Int> = emptyMap(),
+    val chapterErrors: Map<String, String> = emptyMap(),
 ) {
     val selectedSource: LoadedSource?
         get() = selectedSourceId?.let { selectedId ->
