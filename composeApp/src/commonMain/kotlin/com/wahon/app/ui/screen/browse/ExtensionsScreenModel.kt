@@ -4,6 +4,7 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.wahon.shared.domain.model.ExtensionInfo
 import com.wahon.shared.domain.repository.ExtensionRepoRepository
+import com.wahon.shared.domain.repository.ExtensionRuntimeRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -12,6 +13,7 @@ import kotlinx.coroutines.launch
 
 class ExtensionsScreenModel(
     private val repository: ExtensionRepoRepository,
+    private val extensionRuntimeRepository: ExtensionRuntimeRepository,
 ) : ScreenModel {
 
     private val _state = MutableStateFlow(ExtensionsUiState())
@@ -60,6 +62,9 @@ class ExtensionsScreenModel(
         screenModelScope.launch {
             if (extension.installed) {
                 repository.uninstallExtension(extension.id)
+                    .onSuccess {
+                        extensionRuntimeRepository.reloadInstalledSources()
+                    }
                     .onFailure { error ->
                         _state.update {
                             it.copy(error = error.message ?: "Failed to uninstall extension")
@@ -67,6 +72,9 @@ class ExtensionsScreenModel(
                     }
             } else {
                 repository.installExtension(extension)
+                    .onSuccess {
+                        extensionRuntimeRepository.reloadInstalledSources()
+                    }
                     .onFailure { error ->
                         _state.update {
                             it.copy(error = error.message ?: "Failed to install extension")

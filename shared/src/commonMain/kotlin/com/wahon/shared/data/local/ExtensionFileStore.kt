@@ -15,4 +15,6 @@ expect class ExtensionFileStore {
     fun deleteExtension(extensionId: String)
 
     fun exists(extensionId: String): Boolean
+
+    fun readExtension(extensionId: String): ByteArray?
 }

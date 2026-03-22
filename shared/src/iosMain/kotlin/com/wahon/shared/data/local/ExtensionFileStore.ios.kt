@@ -52,6 +52,13 @@ actual class ExtensionFileStore {
         return fileSystem.list(baseDir).any { it.name.startsWith("$safeId.") }
     }
 
+    actual fun readExtension(extensionId: String): ByteArray? {
+        val safeId = sanitizeExtensionId(extensionId)
+        if (!fileSystem.exists(baseDir)) return null
+        val path = fileSystem.list(baseDir).firstOrNull { it.name.startsWith("$safeId.") } ?: return null
+        return fileSystem.read(path) { readByteArray() }
+    }
+
     private fun extensionFromUrl(url: String): String {
         val filePart = url.substringBefore('?').substringAfterLast('/', "")
         val candidate = filePart.substringAfterLast('.', "")

@@ -15,6 +15,6 @@ fun initKoin(appDeclaration: KoinApplication.() -> Unit = {}) =
     }
 
 val appModule = module {
-    factory { ExtensionsScreenModel(get()) }
+    factory { ExtensionsScreenModel(get(), get()) }
     factory { ExtensionRepoScreenModel(get()) }
 }
