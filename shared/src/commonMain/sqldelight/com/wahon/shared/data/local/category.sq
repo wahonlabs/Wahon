@@ -1,0 +1,23 @@
+CREATE TABLE category (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    sort_order INTEGER NOT NULL
+);
+
+selectAllCategories:
+SELECT *
+FROM category
+ORDER BY sort_order ASC, name ASC;
+
+insertCategory:
+INSERT INTO category(name, sort_order)
+VALUES (?, ?);
+
+updateCategory:
+UPDATE category
+SET name = ?, sort_order = ?
+WHERE id = ?;
+
+deleteCategoryById:
+DELETE FROM category
+WHERE id = ?;

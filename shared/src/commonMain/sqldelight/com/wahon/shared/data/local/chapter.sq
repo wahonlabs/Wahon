@@ -1,0 +1,42 @@
+CREATE TABLE chapter (
+    id TEXT NOT NULL PRIMARY KEY,
+    manga_id TEXT NOT NULL REFERENCES manga(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    name TEXT NOT NULL,
+    chapter_number REAL,
+    date_upload INTEGER,
+    read INTEGER NOT NULL DEFAULT 0,
+    last_page_read INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+selectChaptersByMangaId:
+SELECT *
+FROM chapter
+WHERE manga_id = ?
+ORDER BY chapter_number DESC;
+
+upsertChapter:
+INSERT OR REPLACE INTO chapter(
+    id,
+    manga_id,
+    url,
+    name,
+    chapter_number,
+    date_upload,
+    read,
+    last_page_read,
+    created_at,
+    updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateChapterProgress:
+UPDATE chapter
+SET last_page_read = ?, read = ?, updated_at = ?
+WHERE id = ?;
+
+deleteChaptersByMangaId:
+DELETE FROM chapter
+WHERE manga_id = ?;

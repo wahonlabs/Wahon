@@ -78,7 +78,7 @@ fun ExtensionItem(
         }
 
         OutlinedButton(onClick = onInstallClick) {
-            Text(if (extension.installed) "Installed" else "Install")
+            Text(if (extension.installed) "Uninstall" else "Install")
         }
     }
 }

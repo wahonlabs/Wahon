@@ -18,6 +18,17 @@ class ExtensionsScreenModel(
     val state: StateFlow<ExtensionsUiState> = _state.asStateFlow()
 
     init {
+        screenModelScope.launch {
+            repository.getInstalledExtensionIds().collect { installedIds ->
+                _state.update { current ->
+                    current.copy(
+                        allExtensions = current.allExtensions.map { extension ->
+                            extension.copy(installed = installedIds.contains(extension.id))
+                        },
+                    )
+                }
+            }
+        }
         refresh()
     }
 
@@ -42,6 +53,26 @@ class ExtensionsScreenModel(
                         )
                     }
                 }
+        }
+    }
+
+    fun onInstallToggle(extension: ExtensionInfo) {
+        screenModelScope.launch {
+            if (extension.installed) {
+                repository.uninstallExtension(extension.id)
+                    .onFailure { error ->
+                        _state.update {
+                            it.copy(error = error.message ?: "Failed to uninstall extension")
+                        }
+                    }
+            } else {
+                repository.installExtension(extension)
+                    .onFailure { error ->
+                        _state.update {
+                            it.copy(error = error.message ?: "Failed to install extension")
+                        }
+                    }
+            }
         }
     }
 

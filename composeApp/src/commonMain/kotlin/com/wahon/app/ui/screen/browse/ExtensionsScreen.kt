@@ -13,19 +13,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 
 @Composable
 fun ExtensionsScreen(
@@ -33,8 +28,6 @@ fun ExtensionsScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by screenModel.state.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -118,11 +111,7 @@ fun ExtensionsScreen(
                             ) { extension ->
                                 ExtensionItem(
                                     extension = extension,
-                                    onInstallClick = {
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar("Extension installation coming soon")
-                                        }
-                                    },
+                                    onInstallClick = { screenModel.onInstallToggle(extension) },
                                 )
                             }
                         }
@@ -130,10 +119,5 @@ fun ExtensionsScreen(
                 }
             }
         }
-
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
     }
 }

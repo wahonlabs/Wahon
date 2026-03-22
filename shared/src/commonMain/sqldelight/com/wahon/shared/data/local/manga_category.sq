@@ -1,0 +1,22 @@
+CREATE TABLE manga_category (
+    manga_id TEXT NOT NULL REFERENCES manga(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES category(id) ON DELETE CASCADE,
+    PRIMARY KEY (manga_id, category_id)
+);
+
+selectCategoryIdsByMangaId:
+SELECT category_id
+FROM manga_category
+WHERE manga_id = ?;
+
+insertMangaCategory:
+INSERT OR REPLACE INTO manga_category(manga_id, category_id)
+VALUES (?, ?);
+
+deleteCategoriesForManga:
+DELETE FROM manga_category
+WHERE manga_id = ?;
+
+deleteMangaCategory:
+DELETE FROM manga_category
+WHERE manga_id = ? AND category_id = ?;

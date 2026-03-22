@@ -1,0 +1,22 @@
+CREATE TABLE history (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    chapter_id TEXT NOT NULL UNIQUE REFERENCES chapter(id) ON DELETE CASCADE,
+    last_read_at INTEGER NOT NULL,
+    time_read_seconds INTEGER NOT NULL DEFAULT 0
+);
+
+selectRecentHistory:
+SELECT *
+FROM history
+ORDER BY last_read_at DESC;
+
+upsertHistory:
+INSERT OR REPLACE INTO history(chapter_id, last_read_at, time_read_seconds)
+VALUES (?, ?, ?);
+
+deleteHistoryByChapterId:
+DELETE FROM history
+WHERE chapter_id = ?;
+
+clearHistory:
+DELETE FROM history;

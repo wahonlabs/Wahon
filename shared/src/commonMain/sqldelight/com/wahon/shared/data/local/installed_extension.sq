@@ -1,0 +1,52 @@
+CREATE TABLE installed_extension (
+    extension_id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    icon_url TEXT NOT NULL,
+    download_url TEXT NOT NULL,
+    languages_csv TEXT NOT NULL,
+    nsfw INTEGER NOT NULL,
+    base_url TEXT NOT NULL,
+    repo_url TEXT NOT NULL,
+    local_file_path TEXT NOT NULL,
+    file_size_bytes INTEGER NOT NULL,
+    installed_at INTEGER NOT NULL
+);
+
+selectInstalledExtensionIds:
+SELECT extension_id
+FROM installed_extension;
+
+selectAllInstalledExtensions:
+SELECT *
+FROM installed_extension
+ORDER BY name COLLATE NOCASE ASC;
+
+selectInstalledExtensionById:
+SELECT *
+FROM installed_extension
+WHERE extension_id = ?;
+
+upsertInstalledExtension:
+INSERT OR REPLACE INTO installed_extension(
+    extension_id,
+    name,
+    version,
+    icon_url,
+    download_url,
+    languages_csv,
+    nsfw,
+    base_url,
+    repo_url,
+    local_file_path,
+    file_size_bytes,
+    installed_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteInstalledExtensionById:
+DELETE FROM installed_extension
+WHERE extension_id = ?;
+
+clearInstalledExtensions:
+DELETE FROM installed_extension;

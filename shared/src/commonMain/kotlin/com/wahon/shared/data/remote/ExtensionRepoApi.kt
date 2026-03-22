@@ -2,6 +2,7 @@ package com.wahon.shared.data.remote
 
 import com.wahon.shared.data.remote.dto.SourceEntryDto
 import com.wahon.shared.data.remote.dto.SourceListDto
+import io.ktor.client.call.body
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
@@ -31,5 +32,9 @@ class ExtensionRepoApi(private val httpClient: HttpClient) {
         } else {
             json.decodeFromString(rawJson)
         }
+    }
+
+    suspend fun downloadExtension(downloadUrl: String): ByteArray {
+        return httpClient.get(downloadUrl).body()
     }
 }

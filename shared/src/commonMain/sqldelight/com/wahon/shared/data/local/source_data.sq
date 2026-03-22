@@ -1,0 +1,23 @@
+CREATE TABLE source_data (
+    source_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (source_id, key)
+);
+
+selectSourceDataValue:
+SELECT value
+FROM source_data
+WHERE source_id = ? AND key = ?;
+
+upsertSourceData:
+INSERT OR REPLACE INTO source_data(source_id, key, value)
+VALUES (?, ?, ?);
+
+deleteSourceData:
+DELETE FROM source_data
+WHERE source_id = ? AND key = ?;
+
+deleteAllSourceDataBySourceId:
+DELETE FROM source_data
+WHERE source_id = ?;
