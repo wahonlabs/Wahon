@@ -25,8 +25,7 @@ local.properties
 /build-tools/
 /platform-tools/
 /platforms/
-/licenses/
-!/licenses/
+/licenses/*
 !/licenses/README.md
 !/licenses/LICENSE-TRANSLATIONS-APACHE-2.0.txt
 
