@@ -46,6 +46,7 @@ kotlin {
 
             implementation(libs.coil.compose)
             implementation(libs.coil.network.ktor)
+            implementation(libs.okio)
 
             implementation(libs.koin.core)
             implementation(libs.koin.compose)

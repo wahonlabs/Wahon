@@ -34,7 +34,9 @@ data class ChapterInfo(
 @Serializable
 data class PageInfo(
     val index: Int,
-    val imageUrl: String,
+    val imageUrl: String = "",
+    val pageUrl: String = "",
+    val requiresResolve: Boolean = false,
 )
 
 @Serializable

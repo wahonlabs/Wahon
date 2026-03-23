@@ -20,7 +20,13 @@ interface ExtensionRuntimeRepository {
         page: Int,
         filters: List<Filter>,
     ): Result<MangaPage>
+
     suspend fun getMangaDetails(extensionId: String, mangaUrl: String): Result<MangaInfo>
     suspend fun getChapterList(extensionId: String, mangaUrl: String): Result<List<ChapterInfo>>
     suspend fun getPageList(extensionId: String, chapterUrl: String): Result<List<PageInfo>>
+    suspend fun resolvePageImageUrl(
+        extensionId: String,
+        chapterUrl: String,
+        pageInfo: PageInfo,
+    ): Result<String>
 }

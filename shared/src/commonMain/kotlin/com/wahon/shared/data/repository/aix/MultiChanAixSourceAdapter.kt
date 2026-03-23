@@ -5,16 +5,23 @@ import com.wahon.extension.Filter
 import com.wahon.extension.MangaInfo
 import com.wahon.extension.MangaPage
 import com.wahon.extension.PageInfo
+import io.github.aakira.napier.Napier
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 
+@Deprecated(
+    message = "Native AIX adapter is deprecated. Prefer JavaScript extension runtime for this source.",
+    level = DeprecationLevel.WARNING,
+)
 class MultiChanAixSourceAdapter(
     private val httpClient: HttpClient,
 ) : ProfiledAixSourceAdapter<MultiChanAixSourceAdapter.Profile>() {
@@ -281,6 +288,14 @@ class MultiChanAixSourceAdapter(
 
             val resolvedPageUrls = if (pageUrls.isNotEmpty()) pageUrls else fallbackPageUrls
             if (resolvedPageUrls.isEmpty()) {
+                Napier.d(
+                    message = "MultiChan pages parser empty result for $candidateUrl; html preview: ${
+                        previewHtmlForLogs(
+                            html
+                        )
+                    }",
+                    tag = LOG_TAG,
+                )
                 lastFailure = "MultiChan pages parser: no page URLs extracted for $candidateUrl"
                 continue
             }
@@ -964,13 +979,47 @@ class MultiChanAixSourceAdapter(
         url: String,
         configure: (HttpRequestBuilder.() -> Unit)? = null,
     ): String {
+        val requestOrigin = extractOrigin(url)
         val response = httpClient.get(url) {
             configure?.invoke(this)
+            if (headers[HttpHeaders.Referrer].isNullOrBlank() && requestOrigin.isNotBlank()) {
+                header(HttpHeaders.Referrer, requestOrigin)
+            }
         }
+        val contentType = response.headers[HttpHeaders.ContentType].orEmpty()
+        Napier.d(
+            message = "MultiChan request status=${response.status.value} contentType=$contentType url=$url",
+            tag = LOG_TAG,
+        )
         if (!response.status.isSuccess()) {
             error("MultiChan request failed: HTTP ${response.status.value} for $url")
         }
-        return response.bodyAsText()
+        val html = response.bodyAsText()
+        val challengeMarker = detectChallengeMarker(html)
+        if (challengeMarker != null) {
+            Napier.w(
+                message = "MultiChan anti-bot challenge detected ($challengeMarker) for $url",
+                tag = LOG_TAG,
+            )
+            error(CHALLENGE_REQUIRED_MESSAGE)
+        }
+        return html
+    }
+
+    private fun detectChallengeMarker(html: String): String? {
+        val normalizedHtml = html.lowercase()
+        return CHALLENGE_MARKERS.firstOrNull { marker ->
+            normalizedHtml.contains(marker)
+        }
+    }
+
+    private fun previewHtmlForLogs(html: String): String {
+        return html
+            .replace("\r", " ")
+            .replace("\n", " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(HTML_PREVIEW_LIMIT)
     }
 
     data class Profile(
@@ -986,6 +1035,17 @@ class MultiChanAixSourceAdapter(
     )
 
     private companion object {
+        private const val LOG_TAG = "MultiChanAixSourceAdapter"
+        private const val HTML_PREVIEW_LIMIT = 500
+        private const val CHALLENGE_REQUIRED_MESSAGE =
+            "Сайт запросил проверку. Попробуйте очистить cookies или сменить сеть."
+        private val CHALLENGE_MARKERS = listOf(
+            "cf-browser-verification",
+            "ddos-guard",
+            "captcha",
+            "challenge-form",
+        )
+
         private val FULLIMG_MARKERS = listOf(
             "\"fullimg\":[",
             "fullimg:[",

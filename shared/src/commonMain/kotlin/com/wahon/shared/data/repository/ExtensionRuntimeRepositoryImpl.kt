@@ -8,6 +8,12 @@ import com.wahon.extension.MangaPage
 import com.wahon.extension.PageInfo
 import com.wahon.shared.data.local.ExtensionFileStore
 import com.wahon.shared.data.local.WahonDatabase
+import com.wahon.shared.data.remote.NetworkErrorClassifier
+import com.wahon.shared.data.runtime.JsBridgeHtmlModule
+import com.wahon.shared.data.runtime.JsBridgeHttpModule
+import com.wahon.shared.data.runtime.JsBridgeJsonModule
+import com.wahon.shared.data.runtime.JsBridgeStdModule
+import com.wahon.shared.data.runtime.JsRuntimeContext
 import com.wahon.shared.data.repository.aix.AixSourceAdapter
 import com.wahon.shared.data.repository.aix.AixSourceAdapterRegistry
 import com.wahon.shared.data.repository.aix.AixSourceDescriptor
@@ -15,6 +21,7 @@ import com.wahon.shared.data.repository.aix.AixWasmRuntime
 import com.wahon.shared.domain.model.LoadedSource
 import com.wahon.shared.domain.model.SourceRuntimeKind
 import com.wahon.shared.domain.repository.ExtensionRuntimeRepository
+import io.ktor.client.HttpClient
 import io.github.aakira.napier.Napier
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.decodeFromString
@@ -25,6 +32,7 @@ class ExtensionRuntimeRepositoryImpl(
     private val database: WahonDatabase,
     private val extensionFileStore: ExtensionFileStore,
     private val sourceManager: SourceManager,
+    private val httpClient: HttpClient,
     private val aixSourceAdapterRegistry: AixSourceAdapterRegistry,
     private val aixWasmRuntime: AixWasmRuntime,
 ) : ExtensionRuntimeRepository {
@@ -209,6 +217,66 @@ class ExtensionRuntimeRepositoryImpl(
         )
     }
 
+    override suspend fun resolvePageImageUrl(
+        extensionId: String,
+        chapterUrl: String,
+        pageInfo: PageInfo,
+    ): Result<String> {
+        val directUrl = pageInfo.imageUrl.trim()
+        if (directUrl.isNotBlank()) {
+            return Result.success(directUrl)
+        }
+
+        val pageUrl = pageInfo.pageUrl.trim()
+        if (pageUrl.isNotBlank() && (!pageInfo.requiresResolve || isLikelyImageUrl(pageUrl))) {
+            return Result.success(pageUrl)
+        }
+
+        val runtimeResolveResult = executeRuntimeMethod<String>(
+            extensionId = extensionId,
+            methodName = "resolvePageImageUrl",
+            jsArgsJson = buildList {
+                add(json.encodeToString(chapterUrl))
+                add(json.encodeToString(pageInfo.index))
+                add(json.encodeToString(pageInfo.pageUrl))
+                add(json.encodeToString(pageInfo.requiresResolve))
+            },
+            aixBlock = { adapter, source ->
+                adapter.resolvePageImageUrl(
+                    source = source,
+                    chapterUrl = chapterUrl,
+                    pageInfo = pageInfo,
+                )
+            },
+        ).mapCatching { resolvedUrl ->
+            resolvedUrl.trim().ifBlank {
+                error("Resolved page URL is blank for chapter $chapterUrl page ${pageInfo.index}")
+            }
+        }
+        if (runtimeResolveResult.isSuccess) {
+            return runtimeResolveResult
+        }
+        Napier.w(
+            message = "resolvePageImageUrl fallback to getPageList for $extensionId page=${pageInfo.index}: ${runtimeResolveResult.exceptionOrNull()?.message.orEmpty()}",
+            tag = LOG_TAG,
+        )
+
+        return getPageList(
+            extensionId = extensionId,
+            chapterUrl = chapterUrl,
+        ).mapCatching { pages ->
+            pages.firstOrNull { candidate -> candidate.index == pageInfo.index }
+                ?.imageUrl
+                ?.trim()
+                ?.takeIf { candidateUrl -> candidateUrl.isNotBlank() }
+                ?: pages.getOrNull(pageInfo.index)
+                    ?.imageUrl
+                    ?.trim()
+                    ?.takeIf { candidateUrl -> candidateUrl.isNotBlank() }
+                ?: error("Page ${pageInfo.index} not found in chapter $chapterUrl")
+        }
+    }
+
     private suspend fun validateScriptSyntax(script: String): Boolean {
         return runCatching {
             quickJs {
@@ -223,7 +291,7 @@ class ExtensionRuntimeRepositoryImpl(
         jsArgsJson: List<String>,
         crossinline aixBlock: suspend (AixSourceAdapter, AixSourceDescriptor) -> T,
     ): Result<T> {
-        return runCatching {
+        val result = runCatching {
             val loadedSource = sourceManager.get(extensionId)
                 ?: error("Source is not loaded: $extensionId")
 
@@ -251,22 +319,48 @@ class ExtensionRuntimeRepositoryImpl(
                         language = loadedSource.language,
                     )
 
-                    val adapter = resolveAixAdapter(
-                        source = sourceDescriptor,
+                    val jsFallbackSource = resolveJavaScriptFallbackSource(
+                        currentExtensionId = extensionId,
+                        loadedSource = loadedSource,
+                        declaredSourceId = runtime.aixDeclaredSourceId,
                     )
-                    if (adapter != null) {
-                        aixBlock(adapter, sourceDescriptor)
-                    } else {
-                        val resultJson = aixWasmRuntime.executeMethod(
-                            extensionId = extensionId,
-                            payload = payload,
-                            methodName = methodName,
-                            argsJson = jsArgsJson,
-                        )
-                        if (resultJson == "null") {
-                            error("Source method returned null: $methodName")
+                    if (jsFallbackSource != null) {
+                        val jsFallbackResult = runCatching {
+                            executeJavaScriptMethod<T>(
+                                extensionId = jsFallbackSource.extensionId,
+                                methodName = methodName,
+                                argsJson = jsArgsJson,
+                            )
                         }
-                        json.decodeFromString(resultJson)
+                        if (jsFallbackResult.isSuccess) {
+                            Napier.i(
+                                message = "Using JS fallback ${jsFallbackSource.extensionId} for $extensionId::$methodName",
+                                tag = LOG_TAG,
+                            )
+                            jsFallbackResult.getOrThrow()
+                        } else {
+                            Napier.w(
+                                message = "JS fallback ${jsFallbackSource.extensionId} failed for $extensionId::$methodName: ${jsFallbackResult.exceptionOrNull()?.message.orEmpty()}",
+                                tag = LOG_TAG,
+                            )
+                            executeAixMethod(
+                                extensionId = extensionId,
+                                methodName = methodName,
+                                payload = payload,
+                                argsJson = jsArgsJson,
+                                sourceDescriptor = sourceDescriptor,
+                                aixBlock = aixBlock,
+                            )
+                        }
+                    } else {
+                        executeAixMethod(
+                            extensionId = extensionId,
+                            methodName = methodName,
+                            payload = payload,
+                            argsJson = jsArgsJson,
+                            sourceDescriptor = sourceDescriptor,
+                            aixBlock = aixBlock,
+                        )
                     }
                 }
 
@@ -276,6 +370,73 @@ class ExtensionRuntimeRepositoryImpl(
                 }
             }
         }
+        val failure = result.exceptionOrNull() ?: return result
+        val classifiedMessage = NetworkErrorClassifier.classify(failure) ?: return result
+        return Result.failure(IllegalStateException(classifiedMessage, failure))
+    }
+
+    private suspend inline fun <reified T> executeAixMethod(
+        extensionId: String,
+        methodName: String,
+        payload: ByteArray,
+        argsJson: List<String>,
+        sourceDescriptor: AixSourceDescriptor,
+        crossinline aixBlock: suspend (AixSourceAdapter, AixSourceDescriptor) -> T,
+    ): T {
+        val adapter = resolveAixAdapter(
+            source = sourceDescriptor,
+        )
+        if (adapter != null) {
+            return aixBlock(adapter, sourceDescriptor)
+        }
+
+        val resultJson = aixWasmRuntime.executeMethod(
+            extensionId = extensionId,
+            payload = payload,
+            methodName = methodName,
+            argsJson = argsJson,
+        )
+        if (resultJson == "null") {
+            error("Source method returned null: $methodName")
+        }
+        return json.decodeFromString(resultJson)
+    }
+
+    private fun resolveJavaScriptFallbackSource(
+        currentExtensionId: String,
+        loadedSource: LoadedSource,
+        declaredSourceId: String?,
+    ): LoadedSource? {
+        val candidates = sourceManager.loadedSources.value
+            .filter { candidate ->
+                candidate.extensionId != currentExtensionId &&
+                    candidate.runtimeKind == SourceRuntimeKind.JAVASCRIPT &&
+                    candidate.isRuntimeExecutable
+            }
+        if (candidates.isEmpty()) return null
+
+        val normalizedDeclaredSourceId = declaredSourceId
+            ?.trim()
+            ?.takeIf { value -> value.isNotBlank() }
+        if (normalizedDeclaredSourceId != null) {
+            val declaredMatch = candidates.firstOrNull { candidate ->
+                candidate.extensionId.equals(normalizedDeclaredSourceId, ignoreCase = true) ||
+                    candidate.sourceId.equals(normalizedDeclaredSourceId, ignoreCase = true)
+            }
+            if (declaredMatch != null) {
+                return declaredMatch
+            }
+        }
+
+        val normalizedBaseUrl = normalizeBaseUrl(loadedSource.baseUrl)
+        return candidates.firstOrNull { candidate ->
+            candidate.language.equals(loadedSource.language, ignoreCase = true) &&
+                normalizeBaseUrl(candidate.baseUrl) == normalizedBaseUrl
+        }
+    }
+
+    private fun normalizeBaseUrl(rawUrl: String): String {
+        return rawUrl.trim().trimEnd('/').lowercase()
     }
 
     private suspend inline fun <reified T> executeJavaScriptMethod(
@@ -300,7 +461,23 @@ class ExtensionRuntimeRepositoryImpl(
             sourceScript = sourceScript,
             invocationScript = invocationScript,
         )
+        val runtimeContext = JsRuntimeContext(
+            extensionId = extensionId,
+            database = database,
+            httpClient = httpClient,
+            json = json,
+        )
         val resultJson: String = quickJs {
+            JsBridgeHttpModule.install(
+                quickJs = this,
+                context = runtimeContext,
+            )
+            JsBridgeHtmlModule.install(this)
+            JsBridgeJsonModule.install(this)
+            JsBridgeStdModule.install(
+                quickJs = this,
+                context = runtimeContext,
+            )
             evaluate<String>(executableScript)
         }
         if (resultJson == "null") {
@@ -426,6 +603,14 @@ class ExtensionRuntimeRepositoryImpl(
         }
     }
 
+    private fun isLikelyImageUrl(url: String): Boolean {
+        val normalized = url.lowercase()
+        if (normalized.startsWith("file://") || normalized.startsWith("content://")) {
+            return true
+        }
+        return IMAGE_URL_EXTENSION_REGEX.containsMatchIn(normalized)
+    }
+
     private data class RuntimeInspection(
         val runtimeKind: SourceRuntimeKind,
         val script: String? = null,
@@ -436,5 +621,7 @@ class ExtensionRuntimeRepositoryImpl(
 
     private companion object {
         private const val MIN_PRINTABLE_RATIO = 0.70
+        private const val LOG_TAG = "ExtensionRuntimeRepository"
+        private val IMAGE_URL_EXTENSION_REGEX = Regex("""\.(avif|bmp|gif|heic|heif|jpe?g|png|webp)(\?|$)""")
     }
 }

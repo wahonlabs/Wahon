@@ -6,6 +6,7 @@ import com.wahon.shared.data.local.OfflineChapterFileStore
 import com.wahon.shared.data.local.WahonDatabase
 import com.wahon.shared.data.local.stableHash64Hex
 import com.wahon.shared.data.remote.currentTimeMillis
+import com.wahon.shared.data.remote.UserAgentProvider
 import com.wahon.shared.domain.model.DownloadBatchResult
 import com.wahon.shared.domain.repository.ExtensionRuntimeRepository
 import com.wahon.shared.domain.repository.OfflineDownloadRepository
@@ -337,7 +338,7 @@ class OfflineDownloadRepositoryImpl(
     ): ByteArray {
         val response = httpClient.get(imageUrl) {
             header("Referer", refererUrl)
-            header(HttpHeaders.UserAgent, DOWNLOAD_USER_AGENT)
+            header(HttpHeaders.UserAgent, UserAgentProvider.defaultUserAgent())
         }
         if (!response.status.isSuccess()) {
             error("Failed to download image: HTTP ${response.status.value} ($imageUrl)")
@@ -369,8 +370,6 @@ class OfflineDownloadRepositoryImpl(
     private companion object {
         private const val AUTO_DOWNLOAD_ENABLED = "1"
         private const val AUTO_DOWNLOAD_DISABLED = "0"
-        private const val DOWNLOAD_USER_AGENT =
-            "Mozilla/5.0 (Wahon; OfflineDownloader) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36"
     }
 }
 

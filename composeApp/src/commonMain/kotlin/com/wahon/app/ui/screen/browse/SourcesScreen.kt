@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -20,32 +19,23 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-import coil3.compose.LocalPlatformContext
-import coil3.network.NetworkHeaders
-import coil3.network.httpHeaders
-import coil3.request.ImageRequest
 import com.wahon.app.navigation.BrowseOpenOrigin
+import com.wahon.app.ui.screen.reader.ReaderScreen
+import com.wahon.app.ui.screen.reader.ReaderScreenModel
 import com.wahon.extension.ChapterInfo
 import com.wahon.extension.MangaInfo
-import com.wahon.extension.PageInfo
 import com.wahon.shared.domain.model.ChapterProgress
 import com.wahon.shared.domain.model.LoadedSource
 import com.wahon.shared.domain.model.SourceRuntimeKind
-import kotlinx.coroutines.flow.distinctUntilChanged
+import org.koin.compose.koinInject
 
 @Composable
 fun SourcesScreen(
@@ -55,6 +45,7 @@ fun SourcesScreen(
 ) {
     val state by screenModel.state.collectAsState()
     val selectedSource = state.selectedSource
+    val readerScreenModel = koinInject<ReaderScreenModel>()
 
     Box(modifier = modifier.fillMaxSize()) {
         when {
@@ -65,11 +56,20 @@ fun SourcesScreen(
             selectedSource != null -> {
                 when {
                     state.selectedChapterUrl != null -> {
-                        ChapterReaderContent(
+                        val mangaUrl = state.selectedMangaUrl ?: return@Box
+                        val chapterUrl = state.selectedChapterUrl ?: return@Box
+                        val chapterName = state.selectedChapterName ?: "Chapter"
+                        ReaderScreen(
+                            screenModel = readerScreenModel,
                             source = selectedSource,
-                            state = state,
+                            mangaTitle = state.mangaDetails?.title,
+                            mangaUrl = mangaUrl,
+                            chapterUrl = chapterUrl,
+                            chapterName = chapterName,
+                            forcedResumePage = state.chapterForcedResumePage,
                             onBack = screenModel::closeChapterReader,
-                            onVisiblePageChanged = screenModel::onChapterVisiblePageChanged,
+                            onOpenNextChapter = screenModel::openNextChapterFromReader,
+                            onOpenPreviousChapter = screenModel::openPreviousChapterFromReader,
                         )
                     }
 
@@ -740,174 +740,6 @@ private fun ChapterItem(
 }
 
 @Composable
-private fun ChapterReaderContent(
-    source: LoadedSource,
-    state: SourcesUiState,
-    onBack: () -> Unit,
-    onVisiblePageChanged: (Int) -> Unit,
-) {
-    val chapterName = state.selectedChapterName
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        OutlinedButton(onClick = onBack) {
-            Text("Back to chapters")
-        }
-        Text(
-            text = chapterName ?: "Chapter",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-        Text(
-            text = "Source: ${source.name}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-        if (state.isReadingOfflineCopy) {
-            Text(
-                text = "Mode: Offline",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
-        }
-
-        if (state.isLoadingChapterPages) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
-            return
-        }
-
-        val pagesError = state.chapterPagesError
-        if (!pagesError.isNullOrBlank()) {
-            Text(
-                text = pagesError,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
-            return
-        }
-
-        if (state.chapterPages.isEmpty()) {
-            Text(
-                text = "No pages returned for chapter.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp),
-            )
-            return
-        }
-
-        val listState = rememberLazyListState(
-            initialFirstVisibleItemIndex = state.chapterResumePage,
-        )
-
-        LaunchedEffect(state.selectedChapterUrl) {
-            snapshotFlow { listState.firstVisibleItemIndex }
-                .distinctUntilChanged()
-                .collect { pageIndex ->
-                    onVisiblePageChanged(pageIndex)
-                }
-        }
-
-        Text(
-            text = "Reading page: ${state.currentVisiblePage + 1}/${state.chapterPages.size}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            state = listState,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(
-                items = state.chapterPages,
-                key = { page -> page.index },
-            ) { page ->
-                ChapterPageItem(
-                    page = page,
-                    refererUrl = state.selectedChapterUrl ?: source.baseUrl,
-                    sourceBaseUrl = source.baseUrl,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ChapterPageItem(
-    page: PageInfo,
-    refererUrl: String,
-    sourceBaseUrl: String,
-) {
-    val platformContext = LocalPlatformContext.current
-    val resolvedReferer = refererUrl.ifBlank { sourceBaseUrl }
-    val imageRequest = remember(page.imageUrl, platformContext, resolvedReferer) {
-        ImageRequest.Builder(platformContext)
-            .data(page.imageUrl)
-            .httpHeaders(
-                NetworkHeaders.Builder()
-                    .set("Referer", resolvedReferer)
-                    .set("User-Agent", READER_USER_AGENT)
-                    .build(),
-            )
-            .build()
-    }
-    var imageError by remember(page.imageUrl) { mutableStateOf<String?>(null) }
-
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        tonalElevation = 1.dp,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = "Page ${page.index + 1}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
-            AsyncImage(
-                model = imageRequest,
-                contentDescription = "Page ${page.index + 1}",
-                modifier = Modifier.fillMaxWidth(),
-                contentScale = ContentScale.FillWidth,
-                onSuccess = { imageError = null },
-                onError = { state ->
-                    imageError = state.result.throwable.message
-                        ?: "Failed to render image"
-                },
-            )
-            val pageError = imageError
-            if (!pageError.isNullOrBlank()) {
-                Text(
-                    text = pageError,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun EmptySourcesState(
     error: String?,
     onReload: () -> Unit,
@@ -939,6 +771,3 @@ private fun EmptySourcesState(
         }
     }
 }
-
-private const val READER_USER_AGENT =
-    "Mozilla/5.0 (Wahon; Reader) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36"

@@ -43,4 +43,23 @@ interface AixSourceAdapter {
         source: AixSourceDescriptor,
         chapterUrl: String,
     ): List<PageInfo>
+
+    suspend fun resolvePageImageUrl(
+        source: AixSourceDescriptor,
+        chapterUrl: String,
+        pageInfo: PageInfo,
+    ): String {
+        if (pageInfo.imageUrl.isNotBlank()) {
+            return pageInfo.imageUrl
+        }
+        if (pageInfo.pageUrl.isNotBlank() && !pageInfo.requiresResolve) {
+            return pageInfo.pageUrl
+        }
+        val pages = getPageList(
+            source = source,
+            chapterUrl = chapterUrl,
+        )
+        return pages.firstOrNull { page -> page.index == pageInfo.index }?.imageUrl
+            ?: error("Page ${pageInfo.index} not found for chapter $chapterUrl")
+    }
 }

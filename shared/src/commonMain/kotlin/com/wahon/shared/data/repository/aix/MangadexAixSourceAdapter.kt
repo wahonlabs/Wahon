@@ -22,6 +22,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 @Suppress("UNUSED_PARAMETER")
+@Deprecated(
+    message = "Native AIX adapter is deprecated. Prefer JavaScript extension runtime for this source.",
+    level = DeprecationLevel.WARNING,
+)
 class MangadexAixSourceAdapter(
     private val httpClient: HttpClient,
 ) : AixSourceAdapter {

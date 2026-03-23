@@ -45,7 +45,7 @@ val sharedModule = module {
     single { AixSourceAdapterRegistry(adapters = get()) }
     single<AixWasmRuntime> { ScaffoldAixWasmRuntime() }
     single<ExtensionRepoRepository> { ExtensionRepoRepositoryImpl(get(), get(), get(), get()) }
-    single<ExtensionRuntimeRepository> { ExtensionRuntimeRepositoryImpl(get(), get(), get(), get(), get()) }
+    single<ExtensionRuntimeRepository> { ExtensionRuntimeRepositoryImpl(get(), get(), get(), get(), get(), get()) }
     single<HistoryRepository> { HistoryRepositoryImpl(get()) }
     single<MangaRepository> { MangaRepositoryImpl(get()) }
     single<OfflineDownloadRepository> { OfflineDownloadRepositoryImpl(get(), get(), get(), get()) }

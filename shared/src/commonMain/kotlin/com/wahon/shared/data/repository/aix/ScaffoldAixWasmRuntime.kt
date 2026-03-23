@@ -97,56 +97,14 @@ class ScaffoldAixWasmRuntime : AixWasmRuntime {
         )
     }
 
+    @Suppress("UNUSED_PARAMETER")
     private fun buildRuntimeMessage(
         title: String,
         declaredMinAppVersion: String?,
         hasMainModule: Boolean,
         mainModuleInspection: AixWasmModuleInspection?,
     ): String {
-        if (!hasMainModule) {
-            return "Aidoku .aix package is missing Payload/main.wasm"
-        }
-        if (mainModuleInspection == null) {
-            return "Aidoku .aix (WASM) detected: $title. main.wasm is present but cannot be parsed."
-        }
-
-        val minVersionSuffix = declaredMinAppVersion
-            ?.takeIf { it.isNotBlank() }
-            ?.let { " Declared min app version: $it." }
-            .orEmpty()
-
-        val moduleSummary = if (mainModuleInspection.importModules.isEmpty()) {
-            "no imported host modules"
-        } else {
-            "imports ${preview(mainModuleInspection.importModules, IMPORT_MODULE_PREVIEW_LIMIT)}"
-        }
-        val exportsSummary = if (mainModuleInspection.exports.isEmpty()) {
-            "no exported entry points"
-        } else {
-            "exports ${preview(mainModuleInspection.exports, EXPORT_PREVIEW_LIMIT)}"
-        }
-        val unknownModules = mainModuleInspection.importModules
-            .filterNot(KNOWN_AIDOKU_HOST_MODULES::contains)
-        val unknownModulesHint = if (unknownModules.isEmpty()) {
-            ""
-        } else {
-            " Unknown host modules: ${preview(unknownModules, IMPORT_MODULE_PREVIEW_LIMIT)}."
-        }
-        val abiHint = if (mainModuleInspection.aidokuHostAbiDetected) {
-            "Aidoku host ABI detected ($moduleSummary, $exportsSummary)."
-        } else {
-            "Aidoku host ABI was not recognized ($moduleSummary, $exportsSummary)."
-        }
-
-        return buildString {
-            append("Aidoku .aix (WASM) detected: ")
-            append(title)
-            append(". ")
-            append(abiHint)
-            append(unknownModulesHint)
-            append(minVersionSuffix)
-            append(" Generic execution bridge is not enabled yet; source can run only via native compatibility adapter.")
-        }
+        return WASM_RUNTIME_UNAVAILABLE_MESSAGE
     }
 
     private fun expectedWasmExports(methodName: String): List<String> {
@@ -158,16 +116,6 @@ class ScaffoldAixWasmRuntime : AixWasmRuntime {
             "getPageList" -> listOf("get_page_list")
             else -> emptyList()
         }
-    }
-
-    private fun preview(
-        values: List<String>,
-        limit: Int,
-    ): String {
-        if (values.isEmpty()) return "none"
-        if (values.size <= limit) return values.joinToString(separator = ", ")
-        val prefix = values.take(limit).joinToString(separator = ", ")
-        return "$prefix (+${values.size - limit} more)"
     }
 
     private fun isZipArchive(payload: ByteArray): Boolean {
@@ -198,21 +146,8 @@ class ScaffoldAixWasmRuntime : AixWasmRuntime {
         private const val ZIP_SIGNATURE_2: Byte = 0x4B
         private const val ZIP_SIGNATURE_3: Byte = 0x03
         private const val ZIP_SIGNATURE_4: Byte = 0x04
-
-        private const val EXPORT_PREVIEW_LIMIT = 6
-        private const val IMPORT_MODULE_PREVIEW_LIMIT = 5
-
-        private val KNOWN_AIDOKU_HOST_MODULES = setOf(
-            "aidoku",
-            "canvas",
-            "defaults",
-            "env",
-            "html",
-            "js",
-            "json",
-            "net",
-            "std",
-        )
+        private const val WASM_RUNTIME_UNAVAILABLE_MESSAGE =
+            "Это расширение требует WASM-рантайм (пока не реализован). Ищите JS-альтернативу или ждите обновления."
     }
 }
 
