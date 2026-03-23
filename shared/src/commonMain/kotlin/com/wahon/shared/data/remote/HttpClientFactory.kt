@@ -9,12 +9,14 @@ import io.ktor.client.plugins.cookies.CookiesStorage
 import io.ktor.client.plugins.cookies.HttpCookies
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.HttpHeaders
+import io.github.aakira.napier.Napier
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 
 fun createHttpClient(
     rateLimiter: HostRateLimiter,
     cookiesStorage: CookiesStorage,
+    antiBotChallengeResolver: AntiBotChallengeResolver = NoOpAntiBotChallengeResolver(),
 ): HttpClient {
     val client = HttpClient {
         install(HttpTimeout) {
@@ -49,7 +51,41 @@ fun createHttpClient(
 
     client.plugin(HttpSend).intercept { request ->
         rateLimiter.acquire(request.url.host)
-        execute(request)
+        var response = execute(request)
+        val challenge = detectAntiBotChallenge(
+            statusCode = response.response.status.value,
+            serverHeader = response.response.headers[HttpHeaders.Server],
+        )
+        if (challenge != null) {
+            Napier.w(
+                message = "Anti-bot challenge detected: ${challenge.protection} ${challenge.statusCode} for ${request.url}",
+                tag = LOG_TAG,
+            )
+            val userAgent = request.headers[HttpHeaders.UserAgent].orEmpty()
+            val resolved = runCatching {
+                antiBotChallengeResolver.resolve(
+                    requestUrl = request.url.toString(),
+                    challenge = challenge,
+                    userAgent = userAgent,
+                )
+            }.onFailure { error ->
+                Napier.w(
+                    message = "Anti-bot challenge resolver failed: ${error.message.orEmpty()}",
+                    tag = LOG_TAG,
+                )
+            }.getOrDefault(false)
+
+            if (!resolved) {
+                error(ANTI_BOT_ERROR_MESSAGE)
+            }
+
+            Napier.i(
+                message = "Anti-bot challenge resolved, retrying request for ${request.url}",
+                tag = LOG_TAG,
+            )
+            response = execute(request)
+        }
+        response
     }
 
     return client
@@ -59,3 +95,6 @@ private const val DEFAULT_ACCEPT_HEADER =
     "text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.9,*/*;q=0.8"
 private const val DEFAULT_ACCEPT_LANGUAGE =
     "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
+private const val ANTI_BOT_ERROR_MESSAGE =
+    "The site requested an anti-bot challenge. Try VPN or another network. WebView-based bypass is planned for the next phases."
+private const val LOG_TAG = "HttpClientFactory"
