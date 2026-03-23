@@ -35,7 +35,7 @@ class ExtensionRepoRepositoryImpl(
 
     override suspend fun addRepo(url: String): Result<ExtensionRepo> {
         return try {
-            val normalizedUrl = url.trimEnd('/')
+            val normalizedUrl = canonicalRepoUrl(url)
             val existing = _repos.value
             if (existing.any { it.url == normalizedUrl }) {
                 return Result.failure(IllegalArgumentException("Repository already added"))
@@ -82,7 +82,7 @@ class ExtensionRepoRepositoryImpl(
         }
 
         return if (allExtensions.isNotEmpty() || errors.isEmpty()) {
-            Result.success(allExtensions)
+            Result.success(deduplicateExtensions(allExtensions))
         } else {
             Result.failure(errors.first())
         }
@@ -132,7 +132,18 @@ class ExtensionRepoRepositoryImpl(
         val raw = settings.getStringOrNull(REPOS_KEY) ?: return
         try {
             val entries = json.decodeFromString<List<RepoEntry>>(raw)
-            _repos.value = entries.map { ExtensionRepo(url = it.url, name = it.name) }
+            val canonicalized = entries
+                .map { entry ->
+                    RepoEntry(
+                        url = canonicalRepoUrl(entry.url),
+                        name = entry.name,
+                    )
+                }
+                .distinctBy { entry -> entry.url }
+            _repos.value = canonicalized.map { ExtensionRepo(url = it.url, name = it.name) }
+            if (canonicalized.size != entries.size || canonicalized != entries) {
+                saveReposToSettings(_repos.value)
+            }
         } catch (_: Exception) {
             // Corrupted data, reset
         }
@@ -161,8 +172,43 @@ class ExtensionRepoRepositoryImpl(
         _installedExtensionIds.value = existing.toSet()
     }
 
+    private fun deduplicateExtensions(extensions: List<ExtensionInfo>): List<ExtensionInfo> {
+        if (extensions.size <= 1) return extensions
+
+        return extensions
+            .groupBy { extension -> extension.id }
+            .values
+            .map { candidates ->
+                val selected = candidates.maxWithOrNull(
+                    compareBy<ExtensionInfo> { extension -> extension.version }
+                        .thenBy { extension -> if (extension.installed) 1 else 0 },
+                ) ?: candidates.first()
+                val mergedLanguages = candidates
+                    .flatMap { extension -> extension.languages }
+                    .map { language -> language.trim() }
+                    .filter { language -> language.isNotBlank() }
+                    .distinct()
+                selected.copy(
+                    languages = if (mergedLanguages.isEmpty()) selected.languages else mergedLanguages,
+                    installed = candidates.any { extension -> extension.installed },
+                )
+            }
+    }
+
+    private fun canonicalRepoUrl(rawUrl: String): String {
+        val trimmed = rawUrl.trim().trimEnd('/')
+        val lower = trimmed.lowercase()
+        return when {
+            lower.endsWith(INDEX_MIN_SUFFIX) -> trimmed.dropLast(INDEX_MIN_SUFFIX.length)
+            lower.endsWith(INDEX_SUFFIX) -> trimmed.dropLast(INDEX_SUFFIX.length)
+            else -> trimmed
+        }
+    }
+
     companion object {
         private const val REPOS_KEY = "extension_repos"
+        private const val INDEX_MIN_SUFFIX = "/index.min.json"
+        private const val INDEX_SUFFIX = "/index.json"
     }
 }
 

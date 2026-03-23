@@ -136,7 +136,9 @@ fun ExtensionsScreen(
                             }
                             items(
                                 items = extensions,
-                                key = { it.id },
+                                key = { extension ->
+                                    "${extension.id}|${extension.repoUrl}|${extension.version}|${extension.downloadUrl}"
+                                },
                             ) { extension ->
                                 ExtensionItem(
                                     extension = extension,

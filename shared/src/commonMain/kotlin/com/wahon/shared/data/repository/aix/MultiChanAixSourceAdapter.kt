@@ -235,12 +235,16 @@ class MultiChanAixSourceAdapter(
                 continue
             }
             val html = htmlResult.getOrThrow()
+            val chapterHint = extractChapterHint(candidateUrl)
 
             val fullImagePayloads = FULLIMG_BLOCK_REGEX.findAll(html)
                 .map { match -> match.groupValues[1] }
                 .toList()
             val fallbackPayload = extractFullImagePayloadFallback(html)
             val thumbnailPayloads = TH_MAS_BLOCK_REGEX.findAll(html)
+                .map { match -> match.groupValues[1] }
+                .toList()
+            val thumbsPayloads = THUMBS_BLOCK_REGEX.findAll(html)
                 .map { match -> match.groupValues[1] }
                 .toList()
 
@@ -250,6 +254,7 @@ class MultiChanAixSourceAdapter(
                     add(fallbackPayload)
                 }
                 addAll(thumbnailPayloads)
+                addAll(thumbsPayloads)
             }
 
             val pageBaseUrl = extractOrigin(candidateUrl).ifBlank { baseUrl }
@@ -258,16 +263,29 @@ class MultiChanAixSourceAdapter(
                     extractPageUrlsFromPayload(
                         rawPayload = payload,
                         baseUrl = pageBaseUrl,
+                        chapterHint = chapterHint,
                     )
                 }
                 .firstOrNull { urls -> urls.isNotEmpty() }
                 ?: emptyList()
-            if (pageUrls.isEmpty()) {
+
+            val fallbackPageUrls = if (pageUrls.isEmpty()) {
+                extractPageUrlsFromHtmlFallback(
+                    html = html,
+                    baseUrl = pageBaseUrl,
+                    chapterHint = chapterHint,
+                )
+            } else {
+                emptyList()
+            }
+
+            val resolvedPageUrls = if (pageUrls.isNotEmpty()) pageUrls else fallbackPageUrls
+            if (resolvedPageUrls.isEmpty()) {
                 lastFailure = "MultiChan pages parser: no page URLs extracted for $candidateUrl"
                 continue
             }
 
-            return pageUrls.mapIndexed { index, imageUrl ->
+            return resolvedPageUrls.mapIndexed { index, imageUrl ->
                 PageInfo(
                     index = index,
                     imageUrl = imageUrl,
@@ -281,13 +299,14 @@ class MultiChanAixSourceAdapter(
     private fun extractPageUrlsFromPayload(
         rawPayload: String,
         baseUrl: String,
+        chapterHint: String? = null,
     ): List<String> {
         val normalizedPayload = rawPayload
             .replace("\\/", "/")
             .replace("\\u002F", "/")
             .replace("\\u002f", "/")
 
-        return PAGE_URL_REGEX.findAll(normalizedPayload)
+        val extracted = PAGE_URL_REGEX.findAll(normalizedPayload)
             .map { match ->
                 toAbsoluteUrl(
                     rawUrl = match.groupValues[1],
@@ -296,6 +315,75 @@ class MultiChanAixSourceAdapter(
             }
             .distinct()
             .toList()
+        if (extracted.isEmpty()) return emptyList()
+        return filterByChapterHint(
+            urls = extracted,
+            chapterHint = chapterHint,
+        )
+    }
+
+    private fun extractPageUrlsFromHtmlFallback(
+        html: String,
+        baseUrl: String,
+        chapterHint: String?,
+    ): List<String> {
+        val dataBlock = DATA_BLOCK_REGEX.find(html)
+            ?.groupValues
+            ?.get(1)
+            .orEmpty()
+        val scopedPayload = if (dataBlock.isNotBlank()) dataBlock else html
+
+        val extractedFromArrayBlocks = IMAGE_ARRAY_BLOCK_REGEX.findAll(scopedPayload)
+            .flatMap { match ->
+                extractPageUrlsFromPayload(
+                    rawPayload = match.groupValues[2],
+                    baseUrl = baseUrl,
+                    chapterHint = chapterHint,
+                ).asSequence()
+            }
+            .distinct()
+            .toList()
+        if (extractedFromArrayBlocks.isNotEmpty()) {
+            return extractedFromArrayBlocks
+        }
+
+        val looseUrls = IMAGE_URL_FALLBACK_REGEX.findAll(scopedPayload)
+            .map { match ->
+                toAbsoluteUrl(
+                    rawUrl = match.groupValues[1],
+                    baseUrl = baseUrl,
+                )
+            }
+            .distinct()
+            .toList()
+        return filterByChapterHint(
+            urls = looseUrls,
+            chapterHint = chapterHint,
+        )
+    }
+
+    private fun filterByChapterHint(
+        urls: List<String>,
+        chapterHint: String?,
+    ): List<String> {
+        if (urls.isEmpty()) return urls
+        val normalizedHint = chapterHint
+            ?.trim()
+            ?.lowercase()
+            ?.takeIf { hint -> hint.isNotBlank() }
+            ?: return urls
+        val narrowed = urls.filter { url ->
+            url.lowercase().contains(normalizedHint)
+        }
+        return if (narrowed.isNotEmpty()) narrowed else urls
+    }
+
+    private fun extractChapterHint(chapterUrl: String): String? {
+        return CHAPTER_HINT_REGEX.find(chapterUrl.lowercase())
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+            ?.takeIf { value -> value.isNotBlank() }
     }
 
     private fun parseMangaCards(
@@ -588,10 +676,14 @@ class MultiChanAixSourceAdapter(
     }
 
     private fun extractFullImagePayloadFallback(html: String): String? {
-        val markerIndex = html.indexOf(FULLIMG_MARKER)
+        val marker = FULLIMG_MARKERS.firstOrNull { candidate ->
+            html.contains(candidate)
+        } ?: return null
+
+        val markerIndex = html.indexOf(marker)
         if (markerIndex < 0) return null
 
-        val contentStart = markerIndex + FULLIMG_MARKER.length
+        val contentStart = markerIndex + marker.length
         val trailingCommaEnd = html.indexOf(",]", contentStart)
         val arrayEnd = html.indexOf("]", contentStart)
         val contentEnd = when {
@@ -894,7 +986,10 @@ class MultiChanAixSourceAdapter(
     )
 
     private companion object {
-        private const val FULLIMG_MARKER = "fullimg\":["
+        private val FULLIMG_MARKERS = listOf(
+            "\"fullimg\":[",
+            "fullimg:[",
+        )
         private val SCHEME_REGEX = Regex("^https?://", RegexOption.IGNORE_CASE)
 
         private val CONTENT_ROW_START_REGEX = Regex(
@@ -978,15 +1073,31 @@ class MultiChanAixSourceAdapter(
             options = setOf(RegexOption.IGNORE_CASE),
         )
         private val FULLIMG_BLOCK_REGEX = Regex(
-            pattern = """(?s)fullimg"\s*:\s*\[(.*?)]""",
+            pattern = """(?s)(?:["'])?fullimg(?:["'])?\s*:\s*\[(.*?)]""",
             options = setOf(RegexOption.IGNORE_CASE),
         )
         private val PAGE_URL_REGEX = Regex(
-            pattern = """["']((?:https?:)?//[^"']+|/[^"']+)["']""",
+            pattern = """["']((?:https?:)?//[^"']+|/[^"']+|[^/"'](?:[^"']*/)+[^"']+)["']""",
             options = setOf(RegexOption.IGNORE_CASE),
         )
         private val TH_MAS_BLOCK_REGEX = Regex(
-            pattern = """(?s)th_mas"\s*:\s*\[(.*?)]""",
+            pattern = """(?s)(?:["'])?th_mas(?:["'])?\s*:\s*\[(.*?)]""",
+            options = setOf(RegexOption.IGNORE_CASE),
+        )
+        private val THUMBS_BLOCK_REGEX = Regex(
+            pattern = """(?s)(?:["'])?thumbs(?:["'])?\s*:\s*\[(.*?)]""",
+            options = setOf(RegexOption.IGNORE_CASE),
+        )
+        private val DATA_BLOCK_REGEX = Regex(
+            pattern = """(?s)\bvar\s+data\s*=\s*\{(.*?)\}\s*;""",
+            options = setOf(RegexOption.IGNORE_CASE),
+        )
+        private val IMAGE_ARRAY_BLOCK_REGEX = Regex(
+            pattern = """(?s)((?:["'])?(?:fullimg|thumbs|th_mas)(?:["'])?)\s*:\s*\[(.*?)]""",
+            options = setOf(RegexOption.IGNORE_CASE),
+        )
+        private val IMAGE_URL_FALLBACK_REGEX = Regex(
+            pattern = """((?:https?:)?//[^"'\s,)\]]+\.(?:jpe?g|png|webp|gif)(?:\?[^"'\s,)\]]*)?)""",
             options = setOf(RegexOption.IGNORE_CASE),
         )
         private val CHAPTER_NUMBER_REGEX = Regex(
@@ -995,6 +1106,7 @@ class MultiChanAixSourceAdapter(
         )
         private val DATE_REGEX = Regex("""\d{4}-\d{2}-\d{2}""")
         private val CHAPTER_TITLE_HINT_REGEX = Regex("""(?:глава|том|часть|chapter|ch\.?|эпизод|выпуск|\d)""")
+        private val CHAPTER_HINT_REGEX = Regex("""/online/\d+-([^/?#]+)\.html""")
         private val ANCHOR_TEXT_REGEX = Regex(
             pattern = """(?s)<a[^>]*>(.*?)</a>""",
             options = setOf(RegexOption.IGNORE_CASE),
