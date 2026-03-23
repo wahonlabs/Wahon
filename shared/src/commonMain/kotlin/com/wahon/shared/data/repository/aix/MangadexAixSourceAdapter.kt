@@ -5,10 +5,14 @@ import com.wahon.extension.Filter
 import com.wahon.extension.MangaInfo
 import com.wahon.extension.MangaPage
 import com.wahon.extension.PageInfo
+import com.wahon.shared.data.remote.detectAntiBotChallenge
+import com.wahon.shared.data.remote.detectAntiBotProtectionByHtml
+import io.github.aakira.napier.Napier
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.Json
@@ -260,10 +264,33 @@ class MangadexAixSourceAdapter(
         val response = httpClient.get(url) {
             configure?.invoke(this)
         }
+        val raw = response.bodyAsText()
+        val statusCode = response.status.value
+        val challengeByStatus = detectAntiBotChallenge(
+            statusCode = statusCode,
+            serverHeader = response.headers[HttpHeaders.Server],
+        )
+        val challengeByHtml = detectAntiBotProtectionByHtml(raw)
+
         if (!response.status.isSuccess()) {
+            if (challengeByStatus != null || challengeByHtml != null) {
+                Napier.w(
+                    message = "MangaDex anti-bot challenge detected for $url (status=$statusCode, statusProtection=${challengeByStatus?.protection}, htmlProtection=$challengeByHtml)",
+                    tag = LOG_TAG,
+                )
+                error(CHALLENGE_REQUIRED_MESSAGE)
+            }
             error("MangaDex request failed: HTTP ${response.status.value} for $url")
         }
-        val raw = response.bodyAsText()
+
+        if (challengeByHtml != null) {
+            Napier.w(
+                message = "MangaDex anti-bot HTML challenge detected for $url ($challengeByHtml)",
+                tag = LOG_TAG,
+            )
+            error(CHALLENGE_REQUIRED_MESSAGE)
+        }
+
         return json.parseToJsonElement(raw).jsonObject
     }
 
@@ -293,6 +320,9 @@ class MangadexAixSourceAdapter(
         private const val COVERS_BASE = "https://uploads.mangadex.org/covers"
         private const val MANGA_PAGE_SIZE = 20
         private const val CHAPTER_PAGE_SIZE = 100
+        private const val CHALLENGE_REQUIRED_MESSAGE =
+            "Сайт запросил проверку. Попробуйте очистить cookies или сменить сеть."
+        private const val LOG_TAG = "MangadexAixSourceAdapter"
         private val UUID_REGEX = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
     }
 }

@@ -31,4 +31,27 @@ fun detectAntiBotChallenge(
     )
 }
 
+fun detectAntiBotProtectionByHtml(html: String): AntiBotProtection? {
+    if (html.isBlank()) return null
+    val normalizedHtml = html.lowercase()
+    return when {
+        CLOUDFLARE_HTML_MARKERS.any { marker -> normalizedHtml.contains(marker) } -> AntiBotProtection.CLOUDFLARE
+        DDOS_GUARD_HTML_MARKERS.any { marker -> normalizedHtml.contains(marker) } -> AntiBotProtection.DDOS_GUARD
+        else -> null
+    }
+}
+
 private val CHALLENGE_STATUS_CODES = setOf(403, 429, 503)
+private val CLOUDFLARE_HTML_MARKERS = listOf(
+    "cf-browser-verification",
+    "cdn-cgi/challenge-platform",
+    "cf-challenge",
+    "ray id",
+)
+private val DDOS_GUARD_HTML_MARKERS = listOf(
+    "ddos-guard",
+    "__ddg2",
+    "ddg_clearance",
+    "challenge-form",
+    "captcha",
+)

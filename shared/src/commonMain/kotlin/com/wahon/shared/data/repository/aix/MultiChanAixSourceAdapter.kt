@@ -5,6 +5,7 @@ import com.wahon.extension.Filter
 import com.wahon.extension.MangaInfo
 import com.wahon.extension.MangaPage
 import com.wahon.extension.PageInfo
+import com.wahon.shared.data.remote.detectAntiBotProtectionByHtml
 import io.github.aakira.napier.Napier
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
@@ -995,22 +996,15 @@ class MultiChanAixSourceAdapter(
             error("MultiChan request failed: HTTP ${response.status.value} for $url")
         }
         val html = response.bodyAsText()
-        val challengeMarker = detectChallengeMarker(html)
-        if (challengeMarker != null) {
+        val challengeProtection = detectAntiBotProtectionByHtml(html)
+        if (challengeProtection != null) {
             Napier.w(
-                message = "MultiChan anti-bot challenge detected ($challengeMarker) for $url",
+                message = "MultiChan anti-bot challenge detected ($challengeProtection) for $url",
                 tag = LOG_TAG,
             )
             error(CHALLENGE_REQUIRED_MESSAGE)
         }
         return html
-    }
-
-    private fun detectChallengeMarker(html: String): String? {
-        val normalizedHtml = html.lowercase()
-        return CHALLENGE_MARKERS.firstOrNull { marker ->
-            normalizedHtml.contains(marker)
-        }
     }
 
     private fun previewHtmlForLogs(html: String): String {
@@ -1039,12 +1033,6 @@ class MultiChanAixSourceAdapter(
         private const val HTML_PREVIEW_LIMIT = 500
         private const val CHALLENGE_REQUIRED_MESSAGE =
             "Сайт запросил проверку. Попробуйте очистить cookies или сменить сеть."
-        private val CHALLENGE_MARKERS = listOf(
-            "cf-browser-verification",
-            "ddos-guard",
-            "captcha",
-            "challenge-form",
-        )
 
         private val FULLIMG_MARKERS = listOf(
             "\"fullimg\":[",
