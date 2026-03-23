@@ -8,6 +8,9 @@ import com.wahon.shared.domain.repository.ExtensionRuntimeRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -31,30 +34,20 @@ class ExtensionsScreenModel(
                 }
             }
         }
-        refresh()
+
+        screenModelScope.launch {
+            repository.getRepos()
+                .map { repos -> repos.map { repo -> repo.url }.sorted() }
+                .distinctUntilChanged()
+                .collectLatest {
+                    refreshInternal()
+                }
+        }
     }
 
     fun refresh() {
         screenModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
-            repository.fetchAllExtensions()
-                .onSuccess { extensions ->
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            allExtensions = extensions,
-                            error = null,
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            error = error.message ?: "Failed to fetch extensions",
-                        )
-                    }
-                }
+            refreshInternal()
         }
     }
 
@@ -98,6 +91,28 @@ class ExtensionsScreenModel(
                 current
             }
         }
+    }
+
+    private suspend fun refreshInternal() {
+        _state.update { it.copy(isLoading = true, error = null) }
+        repository.fetchAllExtensions()
+            .onSuccess { extensions ->
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        allExtensions = extensions,
+                        error = null,
+                    )
+                }
+            }
+            .onFailure { error ->
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        error = error.message ?: "Failed to fetch extensions",
+                    )
+                }
+            }
     }
 }
 
