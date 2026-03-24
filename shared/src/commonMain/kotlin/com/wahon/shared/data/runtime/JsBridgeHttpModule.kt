@@ -3,6 +3,9 @@ package com.wahon.shared.data.runtime
 import com.dokar.quickjs.QuickJs
 import com.dokar.quickjs.ExperimentalQuickJsApi
 import com.dokar.quickjs.alias.asyncFunc
+import com.wahon.shared.data.remote.detectAntiBotChallenge
+import com.wahon.shared.data.remote.detectAntiBotProtectionByHtml
+import io.github.aakira.napier.Napier
 import io.ktor.client.request.header
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -80,6 +83,13 @@ internal object JsBridgeHttpModule {
                 setBody(resolvedBody)
             }
         }
+        val responseBody = response.bodyAsText()
+        enforceNoAntiBotChallenge(
+            statusCode = response.status.value,
+            serverHeader = response.headers[HttpHeaders.Server],
+            responseBody = responseBody,
+            requestUrl = url,
+        )
 
         val responsePayload = NativeHttpResponse(
             status = response.status.value,
@@ -87,7 +97,7 @@ internal object JsBridgeHttpModule {
             headers = response.headers.entries()
                 .sortedBy { entry -> entry.key.lowercase() }
                 .associate { entry -> entry.key to entry.value.joinToString(separator = ",") },
-            body = response.bodyAsText(),
+            body = responseBody,
         )
 
         return context.json.encodeToString(responsePayload)
@@ -130,6 +140,26 @@ internal object JsBridgeHttpModule {
         return primitive.contentOrNull
     }
 
+    private fun enforceNoAntiBotChallenge(
+        statusCode: Int,
+        serverHeader: String?,
+        responseBody: String,
+        requestUrl: String,
+    ) {
+        val byStatus = detectAntiBotChallenge(
+            statusCode = statusCode,
+            serverHeader = serverHeader,
+        )
+        val byHtml = detectAntiBotProtectionByHtml(responseBody)
+        if (byStatus == null && byHtml == null) return
+
+        Napier.w(
+            message = "JS bridge anti-bot challenge detected for $requestUrl (status=$statusCode, statusProtection=${byStatus?.protection}, htmlProtection=$byHtml)",
+            tag = LOG_TAG,
+        )
+        error(ANTI_BOT_ERROR_MESSAGE)
+    }
+
     private suspend fun evaluateBridgeScript(
         quickJs: QuickJs,
         script: String,
@@ -160,6 +190,9 @@ internal object JsBridgeHttpModule {
 }
 
 private const val NATIVE_HTTP_REQUEST_FUNCTION = "__wahonNativeHttpRequest"
+private const val LOG_TAG = "JsBridgeHttpModule"
+private const val ANTI_BOT_ERROR_MESSAGE =
+    "The site requested an anti-bot challenge. Try VPN or another network and retry."
 
 private const val HTTP_BRIDGE_SCRIPT =
     """
