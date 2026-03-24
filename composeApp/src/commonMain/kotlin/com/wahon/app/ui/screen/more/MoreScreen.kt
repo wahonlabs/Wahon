@@ -71,6 +71,9 @@ fun MoreScreen() {
     var pdfDirectoryPath by remember { mutableStateOf("") }
     var pdfDirectoryImportInProgress by remember { mutableStateOf(false) }
     var pdfDirectoryStatus by remember { mutableStateOf<String?>(null) }
+    var mixedDirectoryPath by remember { mutableStateOf("") }
+    var mixedDirectoryImportInProgress by remember { mutableStateOf(false) }
+    var mixedDirectoryStatus by remember { mutableStateOf<String?>(null) }
     val isIosPlatform = platformName.startsWith("iOS", ignoreCase = true)
     val dohNote = buildString {
         append("Current: ${dohProvider.displayName()}. Tap to switch.")
@@ -419,6 +422,85 @@ fun MoreScreen() {
                 }
             }
             val directoryStatus = pdfDirectoryStatus
+            if (!directoryStatus.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = directoryStatus,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            Text(
+                text = "Import Mixed Directory",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = mixedDirectoryPath,
+                onValueChange = { value ->
+                    mixedDirectoryPath = value
+                    if (mixedDirectoryStatus != null) {
+                        mixedDirectoryStatus = null
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Absolute directory path") },
+                supportingText = {
+                    val supportText = if (isIosPlatform) {
+                        "Mixed import supports only CBZ on iOS currently."
+                    } else {
+                        "Imports all .cbz and .pdf files recursively."
+                    }
+                    Text(supportText)
+                },
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    val rawPath = mixedDirectoryPath.trim()
+                    if (rawPath.isBlank() || mixedDirectoryImportInProgress) {
+                        return@Button
+                    }
+                    mixedDirectoryImportInProgress = true
+                    mixedDirectoryStatus = null
+                    coroutineScope.launch {
+                        localArchiveRepository.importSupportedDirectory(rawPath)
+                            .onSuccess { result ->
+                                mixedDirectoryStatus = buildDirectoryImportStatus(
+                                    result = result,
+                                    fileExtension = ".cbz/.pdf",
+                                )
+                            }
+                            .onFailure { error ->
+                                mixedDirectoryStatus = error.message ?: "Failed to import mixed directory"
+                            }
+                        mixedDirectoryImportInProgress = false
+                    }
+                },
+                enabled = mixedDirectoryPath.trim().isNotEmpty() && !mixedDirectoryImportInProgress,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (mixedDirectoryImportInProgress) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                    }
+                    Text("Import Mixed")
+                }
+            }
+            val directoryStatus = mixedDirectoryStatus
             if (!directoryStatus.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(

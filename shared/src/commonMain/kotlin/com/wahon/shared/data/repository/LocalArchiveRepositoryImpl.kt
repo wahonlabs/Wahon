@@ -406,6 +406,60 @@ class LocalArchiveRepositoryImpl(
         }
     }
 
+    override suspend fun importSupportedDirectory(
+        directoryPath: String,
+        recursive: Boolean,
+    ): Result<LocalCbzImportBatchResult> {
+        val cbzFiles = runCatching {
+            localArchiveFileScanner.listCbzFiles(
+                directoryPath = directoryPath,
+                recursive = recursive,
+            )
+        }.getOrElse { error ->
+            return Result.failure(error)
+        }
+        val pdfFiles = runCatching {
+            localArchiveFileScanner.listPdfFiles(
+                directoryPath = directoryPath,
+                recursive = recursive,
+            )
+        }.getOrElse { error ->
+            return Result.failure(error)
+        }
+        val files = (cbzFiles + pdfFiles)
+            .distinct()
+            .sorted()
+
+        return runCatching {
+            var imported = 0
+            val failures = mutableListOf<LocalCbzImportFailure>()
+
+            files.forEach { filePath ->
+                val importResult = when {
+                    filePath.lowercase().endsWith(PDF_EXTENSION) -> importPdfFile(filePath)
+                    else -> importCbzArchive(filePath)
+                }
+                importResult
+                    .onSuccess {
+                        imported += 1
+                    }
+                    .onFailure { error ->
+                        failures += LocalCbzImportFailure(
+                            archivePath = filePath,
+                            reason = error.message ?: "Unknown import failure",
+                        )
+                    }
+            }
+
+            LocalCbzImportBatchResult(
+                discovered = files.size,
+                imported = imported,
+                failed = failures.size,
+                failures = failures,
+            )
+        }
+    }
+
     override suspend fun removeImportedCbz(mangaUrl: String): Result<Unit> {
         val normalizedMangaUrl = mangaUrl.trim()
         if (normalizedMangaUrl.isBlank()) {
@@ -470,5 +524,6 @@ class LocalArchiveRepositoryImpl(
         private const val MANGA_LAST_READ_KEY_PREFIX = "manga_last_read::"
         private const val CBZ_CHAPTER_SUFFIX = "#cbz-main"
         private const val PDF_CHAPTER_SUFFIX = "#pdf-main"
+        private const val PDF_EXTENSION = ".pdf"
     }
 }
