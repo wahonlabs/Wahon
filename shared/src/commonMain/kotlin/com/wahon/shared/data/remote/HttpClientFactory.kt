@@ -17,8 +17,9 @@ fun createHttpClient(
     rateLimiter: HostRateLimiter,
     cookiesStorage: CookiesStorage,
     antiBotChallengeResolver: AntiBotChallengeResolver = NoOpAntiBotChallengeResolver(),
+    dohProvider: DnsOverHttpsProvider = DnsOverHttpsProvider.DISABLED,
 ): HttpClient {
-    val client = HttpClient {
+    val client = createPlatformHttpClient(dohProvider = dohProvider) {
         install(HttpTimeout) {
             requestTimeoutMillis = 30_000
             connectTimeoutMillis = 20_000

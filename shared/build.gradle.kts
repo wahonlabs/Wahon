@@ -41,6 +41,8 @@ kotlin {
 
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
+            implementation(libs.okhttp.core)
+            implementation(libs.okhttp.dnsoverhttps)
             implementation(libs.sqldelight.android.driver)
             implementation(libs.koin.android)
             implementation(libs.kotlinx.coroutines.android)
