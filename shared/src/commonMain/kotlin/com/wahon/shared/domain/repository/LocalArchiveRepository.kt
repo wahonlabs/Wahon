@@ -23,6 +23,13 @@ interface LocalArchiveRepository {
         recursive: Boolean = true,
     ): Result<LocalCbzImportBatchResult>
 
+    suspend fun importCbrFile(cbrPath: String): Result<LocalCbzImportResult>
+
+    suspend fun importCbrDirectory(
+        directoryPath: String,
+        recursive: Boolean = true,
+    ): Result<LocalCbzImportBatchResult>
+
     suspend fun importSupportedDirectory(
         directoryPath: String,
         recursive: Boolean = true,

@@ -406,6 +406,56 @@ class LocalArchiveRepositoryImpl(
         }
     }
 
+    override suspend fun importCbrFile(cbrPath: String): Result<LocalCbzImportResult> {
+        val normalizedPath = cbrPath.trim()
+        if (normalizedPath.isBlank()) {
+            return Result.failure(IllegalArgumentException("CBR path is blank"))
+        }
+
+        return Result.failure(
+            IllegalStateException(CBR_IMPORT_UNAVAILABLE_MESSAGE),
+        )
+    }
+
+    override suspend fun importCbrDirectory(
+        directoryPath: String,
+        recursive: Boolean,
+    ): Result<LocalCbzImportBatchResult> {
+        val cbrFiles = runCatching {
+            localArchiveFileScanner.listCbrFiles(
+                directoryPath = directoryPath,
+                recursive = recursive,
+            ).sorted()
+        }.getOrElse { error ->
+            return Result.failure(error)
+        }
+
+        return runCatching {
+            var imported = 0
+            val failures = mutableListOf<LocalCbzImportFailure>()
+
+            cbrFiles.forEach { cbrPath ->
+                importCbrFile(cbrPath)
+                    .onSuccess {
+                        imported += 1
+                    }
+                    .onFailure { error ->
+                        failures += LocalCbzImportFailure(
+                            archivePath = cbrPath,
+                            reason = error.message ?: "Unknown import failure",
+                        )
+                    }
+            }
+
+            LocalCbzImportBatchResult(
+                discovered = cbrFiles.size,
+                imported = imported,
+                failed = failures.size,
+                failures = failures,
+            )
+        }
+    }
+
     override suspend fun importSupportedDirectory(
         directoryPath: String,
         recursive: Boolean,
@@ -426,7 +476,15 @@ class LocalArchiveRepositoryImpl(
         }.getOrElse { error ->
             return Result.failure(error)
         }
-        val files = (cbzFiles + pdfFiles)
+        val cbrFiles = runCatching {
+            localArchiveFileScanner.listCbrFiles(
+                directoryPath = directoryPath,
+                recursive = recursive,
+            )
+        }.getOrElse { error ->
+            return Result.failure(error)
+        }
+        val files = (cbzFiles + pdfFiles + cbrFiles)
             .distinct()
             .sorted()
 
@@ -437,6 +495,9 @@ class LocalArchiveRepositoryImpl(
             files.forEach { filePath ->
                 val importResult = when {
                     filePath.lowercase().endsWith(PDF_EXTENSION) -> importPdfFile(filePath)
+                    filePath.lowercase().endsWith(CBR_EXTENSION) ||
+                        filePath.lowercase().endsWith(RAR_EXTENSION) -> importCbrFile(filePath)
+
                     else -> importCbzArchive(filePath)
                 }
                 importResult
@@ -524,6 +585,10 @@ class LocalArchiveRepositoryImpl(
         private const val MANGA_LAST_READ_KEY_PREFIX = "manga_last_read::"
         private const val CBZ_CHAPTER_SUFFIX = "#cbz-main"
         private const val PDF_CHAPTER_SUFFIX = "#pdf-main"
+        private const val CBR_EXTENSION = ".cbr"
+        private const val RAR_EXTENSION = ".rar"
         private const val PDF_EXTENSION = ".pdf"
+        private const val CBR_IMPORT_UNAVAILABLE_MESSAGE =
+            "CBR/RAR import backend is not implemented yet. Import .cbz or .pdf for now."
     }
 }

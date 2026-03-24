@@ -71,6 +71,12 @@ fun MoreScreen() {
     var pdfDirectoryPath by remember { mutableStateOf("") }
     var pdfDirectoryImportInProgress by remember { mutableStateOf(false) }
     var pdfDirectoryStatus by remember { mutableStateOf<String?>(null) }
+    var cbrImportPath by remember { mutableStateOf("") }
+    var cbrImportInProgress by remember { mutableStateOf(false) }
+    var cbrImportStatus by remember { mutableStateOf<String?>(null) }
+    var cbrDirectoryPath by remember { mutableStateOf("") }
+    var cbrDirectoryImportInProgress by remember { mutableStateOf(false) }
+    var cbrDirectoryStatus by remember { mutableStateOf<String?>(null) }
     var mixedDirectoryPath by remember { mutableStateOf("") }
     var mixedDirectoryImportInProgress by remember { mutableStateOf(false) }
     var mixedDirectoryStatus by remember { mutableStateOf<String?>(null) }
@@ -196,6 +202,152 @@ fun MoreScreen() {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            Text(
+                text = "Import Local CBR",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = cbrImportPath,
+                onValueChange = { value ->
+                    cbrImportPath = value
+                    if (cbrImportStatus != null) {
+                        cbrImportStatus = null
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Absolute .cbr or .rar path") },
+                supportingText = {
+                    Text("CBR/RAR parser backend is not implemented yet. This action is a scaffold.")
+                },
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    val rawPath = cbrImportPath.trim()
+                    if (rawPath.isBlank() || cbrImportInProgress) {
+                        return@Button
+                    }
+                    cbrImportInProgress = true
+                    cbrImportStatus = null
+                    coroutineScope.launch {
+                        localArchiveRepository.importCbrFile(rawPath)
+                            .onSuccess { result ->
+                                cbrImportStatus =
+                                    "Imported: ${result.title} (${result.pageCount} pages). Open it from Library."
+                            }
+                            .onFailure { error ->
+                                cbrImportStatus = error.message ?: "Failed to import CBR file"
+                            }
+                        cbrImportInProgress = false
+                    }
+                },
+                enabled = cbrImportPath.trim().isNotEmpty() && !cbrImportInProgress,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (cbrImportInProgress) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                    }
+                    Text("Import CBR")
+                }
+            }
+            val status = cbrImportStatus
+            if (!status.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            Text(
+                text = "Import CBR Directory",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = cbrDirectoryPath,
+                onValueChange = { value ->
+                    cbrDirectoryPath = value
+                    if (cbrDirectoryStatus != null) {
+                        cbrDirectoryStatus = null
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Absolute directory path") },
+                supportingText = {
+                    Text("Scans recursively for .cbr and .rar files.")
+                },
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    val rawPath = cbrDirectoryPath.trim()
+                    if (rawPath.isBlank() || cbrDirectoryImportInProgress) {
+                        return@Button
+                    }
+                    cbrDirectoryImportInProgress = true
+                    cbrDirectoryStatus = null
+                    coroutineScope.launch {
+                        localArchiveRepository.importCbrDirectory(rawPath)
+                            .onSuccess { result ->
+                                cbrDirectoryStatus = buildDirectoryImportStatus(
+                                    result = result,
+                                    fileExtension = ".cbr/.rar",
+                                )
+                            }
+                            .onFailure { error ->
+                                cbrDirectoryStatus = error.message ?: "Failed to import CBR directory"
+                            }
+                        cbrDirectoryImportInProgress = false
+                    }
+                },
+                enabled = cbrDirectoryPath.trim().isNotEmpty() && !cbrDirectoryImportInProgress,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (cbrDirectoryImportInProgress) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                    }
+                    Text("Import CBR Directory")
+                }
+            }
+            val directoryStatus = cbrDirectoryStatus
+            if (!directoryStatus.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = directoryStatus,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -457,7 +609,7 @@ fun MoreScreen() {
                     val supportText = if (isIosPlatform) {
                         "Mixed import supports only CBZ on iOS currently."
                     } else {
-                        "Imports all .cbz and .pdf files recursively."
+                        "Imports all .cbz, .pdf, .cbr, and .rar files recursively."
                     }
                     Text(supportText)
                 },
@@ -476,7 +628,7 @@ fun MoreScreen() {
                             .onSuccess { result ->
                                 mixedDirectoryStatus = buildDirectoryImportStatus(
                                     result = result,
-                                    fileExtension = ".cbz/.pdf",
+                                    fileExtension = ".cbz/.pdf/.cbr/.rar",
                                 )
                             }
                             .onFailure { error ->

@@ -10,4 +10,9 @@ expect class LocalArchiveFileScanner() {
         directoryPath: String,
         recursive: Boolean = true,
     ): List<String>
+
+    fun listCbrFiles(
+        directoryPath: String,
+        recursive: Boolean = true,
+    ): List<String>
 }

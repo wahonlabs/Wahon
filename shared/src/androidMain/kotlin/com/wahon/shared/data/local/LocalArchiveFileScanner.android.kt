@@ -29,6 +29,23 @@ actual class LocalArchiveFileScanner actual constructor() {
         )
     }
 
+    actual fun listCbrFiles(
+        directoryPath: String,
+        recursive: Boolean,
+    ): List<String> {
+        val cbrFiles = listFilesByExtension(
+            directoryPath = directoryPath,
+            recursive = recursive,
+            extension = CBR_EXTENSION,
+        )
+        val rarFiles = listFilesByExtension(
+            directoryPath = directoryPath,
+            recursive = recursive,
+            extension = RAR_EXTENSION,
+        )
+        return (cbrFiles + rarFiles).distinct()
+    }
+
     private fun listFilesByExtension(
         directoryPath: String,
         recursive: Boolean,
@@ -103,5 +120,7 @@ actual class LocalArchiveFileScanner actual constructor() {
     private companion object {
         private const val CBZ_EXTENSION = ".cbz"
         private const val PDF_EXTENSION = ".pdf"
+        private const val CBR_EXTENSION = ".cbr"
+        private const val RAR_EXTENSION = ".rar"
     }
 }
