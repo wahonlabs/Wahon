@@ -71,10 +71,24 @@ class AndroidWebViewAntiBotChallengeResolver(
 
                 if (resolvedCookieHeader.isNullOrBlank()) {
                     Napier.w(
-                        message = "Anti-bot resolve timeout for $requestUrl (${challenge.protection})",
+                        message = "Auto anti-bot resolve timeout for $requestUrl (${challenge.protection}). Starting manual fallback.",
                         tag = LOG_TAG,
                     )
-                    return@withContext false
+                    webView.releaseSafely()
+                    resolvedCookieHeader = AndroidManualAntiBotChallengeSession.launchAndAwait(
+                        context = appContext,
+                        requestUrl = requestUrl,
+                        userAgent = userAgent,
+                        expectedCookies = expectedCookies,
+                        timeoutMs = ANTI_BOT_MANUAL_TIMEOUT_MS,
+                    )
+                    if (resolvedCookieHeader.isNullOrBlank()) {
+                        Napier.w(
+                            message = "Manual anti-bot fallback did not resolve challenge for $requestUrl",
+                            tag = LOG_TAG,
+                        )
+                        return@withContext false
+                    }
                 }
                 val cookieHeader = resolvedCookieHeader ?: return@withContext false
 
@@ -120,3 +134,4 @@ class AndroidWebViewAntiBotChallengeResolver(
 }
 
 private const val LOG_TAG = "AndroidAntiBotResolver"
+private const val ANTI_BOT_MANUAL_TIMEOUT_MS = 60_000L
