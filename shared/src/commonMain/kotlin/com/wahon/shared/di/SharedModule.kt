@@ -6,11 +6,13 @@ import com.wahon.shared.data.remote.NetworkPreferencesStore
 import com.wahon.shared.data.remote.PersistentCookiesStorage
 import com.wahon.shared.data.remote.createHttpClient
 import com.wahon.shared.data.remote.defaultHostThrottleProfiles
+import com.wahon.shared.data.local.CbzArchiveReader
 import com.wahon.shared.data.local.WahonDatabaseFactory
 import com.wahon.shared.data.repository.ExtensionManager
 import com.wahon.shared.data.repository.ExtensionRuntimeRepositoryImpl
 import com.wahon.shared.data.repository.ExtensionRepoRepositoryImpl
 import com.wahon.shared.data.repository.HistoryRepositoryImpl
+import com.wahon.shared.data.repository.LocalArchiveRepositoryImpl
 import com.wahon.shared.data.repository.MangaRepositoryImpl
 import com.wahon.shared.data.repository.OfflineDownloadRepositoryImpl
 import com.wahon.shared.data.repository.ReaderProgressRepositoryImpl
@@ -25,6 +27,7 @@ import com.wahon.shared.data.repository.aix.ScaffoldAixWasmRuntime
 import com.wahon.shared.domain.repository.ExtensionRuntimeRepository
 import com.wahon.shared.domain.repository.ExtensionRepoRepository
 import com.wahon.shared.domain.repository.HistoryRepository
+import com.wahon.shared.domain.repository.LocalArchiveRepository
 import com.wahon.shared.domain.repository.MangaRepository
 import com.wahon.shared.domain.repository.OfflineDownloadRepository
 import com.wahon.shared.domain.repository.ReaderProgressRepository
@@ -47,6 +50,7 @@ val sharedModule = module {
     single { ExtensionRepoApi(get()) }
     single { WahonDatabaseFactory(get()) }
     single { get<WahonDatabaseFactory>().create() }
+    single { CbzArchiveReader() }
     single { SourceManager() }
     single<MangadexAixSourceAdapter> { MangadexAixSourceAdapter(get()) }
     single<MultiChanAixSourceAdapter> { MultiChanAixSourceAdapter(get()) }
@@ -58,6 +62,7 @@ val sharedModule = module {
     single<HistoryRepository> { HistoryRepositoryImpl(get()) }
     single<MangaRepository> { MangaRepositoryImpl(get()) }
     single<OfflineDownloadRepository> { OfflineDownloadRepositoryImpl(get(), get(), get(), get()) }
+    single<LocalArchiveRepository> { LocalArchiveRepositoryImpl(get(), get(), get(), get()) }
     single<UpdatesRepository> { UpdatesRepositoryImpl(get()) }
     single<ReaderProgressRepository> { ReaderProgressRepositoryImpl(get()) }
     single { ExtensionManager(get()) }

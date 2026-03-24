@@ -13,6 +13,7 @@ import com.wahon.extension.PageInfo
 import com.wahon.shared.domain.model.Chapter
 import com.wahon.shared.domain.model.ChapterProgress
 import com.wahon.shared.domain.model.LoadedSource
+import com.wahon.shared.domain.model.LOCAL_CBZ_SOURCE_ID
 import com.wahon.shared.domain.model.Manga
 import com.wahon.shared.domain.model.MangaLastRead
 import com.wahon.shared.domain.model.MangaStatus
@@ -310,6 +311,14 @@ class SourcesScreenModel(
             )
         }
 
+        if (sourceId == LOCAL_CBZ_SOURCE_ID) {
+            openLocalMangaDetails(
+                sourceId = sourceId,
+                mangaUrl = mangaUrl,
+            )
+            return
+        }
+
         screenModelScope.launch {
             val mangaId = buildMangaId(sourceId = sourceId, mangaUrl = mangaUrl)
             val isInLibrary = runCatching {
@@ -387,6 +396,90 @@ class SourcesScreenModel(
                     chapterProgressByUrl = chapterProgressByUrl,
                     mangaLastRead = mangaLastRead,
                     isInLibrary = isInLibrary,
+                    isUpdatingLibrary = false,
+                    libraryActionError = null,
+                    downloadedChapterUrls = downloadedChapterUrls,
+                    downloadingChapterUrls = emptySet(),
+                    isDownloadingAllChapters = false,
+                    isAutoDownloadEnabled = autoDownloadEnabled,
+                    downloadStatusMessage = null,
+                    isReadingOfflineCopy = false,
+                )
+            }
+        }
+    }
+
+    private fun openLocalMangaDetails(
+        sourceId: String,
+        mangaUrl: String,
+    ) {
+        screenModelScope.launch {
+            val mangaId = buildMangaId(
+                sourceId = sourceId,
+                mangaUrl = mangaUrl,
+            )
+            val manga = mangaRepository.getMangaById(mangaId)
+            val chapters = mangaRepository.getChapters(mangaId)
+                .sortedByDescending { chapter -> chapter.chapterNumber }
+                .map { chapter -> chapter.toExtensionChapterInfo() }
+            val chapterProgressByUrl = runCatching {
+                readerProgressRepository.getChapterProgressMap(
+                    sourceId = sourceId,
+                    chapterUrls = chapters.map { chapter -> chapter.url },
+                )
+            }.getOrElse { emptyMap() }
+            val mangaLastRead = runCatching {
+                readerProgressRepository.getMangaLastRead(
+                    sourceId = sourceId,
+                    mangaUrl = mangaUrl,
+                )
+            }.getOrNull()
+            val downloadedChapterUrls = runCatching {
+                offlineDownloadRepository.getDownloadedChapterUrls(
+                    sourceId = sourceId,
+                    mangaUrl = mangaUrl,
+                )
+            }.getOrElse { emptySet() }
+            val autoDownloadEnabled = runCatching {
+                offlineDownloadRepository.isAutoDownloadEnabled(
+                    sourceId = sourceId,
+                    mangaUrl = mangaUrl,
+                )
+            }.getOrDefault(false)
+
+            _state.update { current ->
+                if (current.selectedSourceId != sourceId || current.selectedMangaUrl != mangaUrl) {
+                    return@update current
+                }
+
+                if (manga == null) {
+                    return@update current.copy(
+                        mangaDetails = null,
+                        chapters = emptyList(),
+                        isLoadingMangaDetails = false,
+                        mangaDetailsError = "Local archive metadata is missing. Re-import the file from More.",
+                        chapterProgressByUrl = emptyMap(),
+                        mangaLastRead = null,
+                        isInLibrary = false,
+                        isUpdatingLibrary = false,
+                        libraryActionError = null,
+                        downloadedChapterUrls = emptySet(),
+                        downloadingChapterUrls = emptySet(),
+                        isDownloadingAllChapters = false,
+                        isAutoDownloadEnabled = false,
+                        downloadStatusMessage = null,
+                        isReadingOfflineCopy = false,
+                    )
+                }
+
+                current.copy(
+                    mangaDetails = manga.toExtensionMangaInfo(),
+                    chapters = chapters,
+                    isLoadingMangaDetails = false,
+                    mangaDetailsError = null,
+                    chapterProgressByUrl = chapterProgressByUrl,
+                    mangaLastRead = mangaLastRead,
+                    isInLibrary = manga.inLibrary,
                     isUpdatingLibrary = false,
                     libraryActionError = null,
                     downloadedChapterUrls = downloadedChapterUrls,
@@ -1128,6 +1221,29 @@ private fun ChapterInfo.toDomainChapter(
     )
 }
 
+private fun Manga.toExtensionMangaInfo(): MangaInfo {
+    return MangaInfo(
+        url = url,
+        title = title,
+        artist = artist,
+        author = author,
+        description = description,
+        coverUrl = coverUrl,
+        status = status.toExtensionStatus(),
+        genres = genres,
+    )
+}
+
+private fun Chapter.toExtensionChapterInfo(): ChapterInfo {
+    return ChapterInfo(
+        url = url,
+        name = name,
+        chapterNumber = chapterNumber,
+        dateUpload = dateUpload,
+        scanlator = scanlator,
+    )
+}
+
 private fun Int.toMangaStatus(): MangaStatus {
     return when (this) {
         MangaInfo.STATUS_ONGOING -> MangaStatus.ONGOING
@@ -1135,5 +1251,15 @@ private fun Int.toMangaStatus(): MangaStatus {
         MangaInfo.STATUS_HIATUS -> MangaStatus.HIATUS
         MangaInfo.STATUS_CANCELLED -> MangaStatus.CANCELLED
         else -> MangaStatus.UNKNOWN
+    }
+}
+
+private fun MangaStatus.toExtensionStatus(): Int {
+    return when (this) {
+        MangaStatus.ONGOING -> MangaInfo.STATUS_ONGOING
+        MangaStatus.COMPLETED -> MangaInfo.STATUS_COMPLETED
+        MangaStatus.HIATUS -> MangaInfo.STATUS_HIATUS
+        MangaStatus.CANCELLED -> MangaInfo.STATUS_CANCELLED
+        MangaStatus.UNKNOWN -> MangaInfo.STATUS_UNKNOWN
     }
 }

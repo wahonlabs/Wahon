@@ -18,6 +18,9 @@ import com.wahon.shared.data.repository.aix.AixSourceAdapter
 import com.wahon.shared.data.repository.aix.AixSourceAdapterRegistry
 import com.wahon.shared.data.repository.aix.AixSourceDescriptor
 import com.wahon.shared.data.repository.aix.AixWasmRuntime
+import com.wahon.shared.domain.model.LOCAL_CBZ_SOURCE_BASE_URL
+import com.wahon.shared.domain.model.LOCAL_CBZ_SOURCE_ID
+import com.wahon.shared.domain.model.LOCAL_CBZ_SOURCE_NAME
 import com.wahon.shared.domain.model.LoadedSource
 import com.wahon.shared.domain.model.SourceRuntimeKind
 import com.wahon.shared.domain.repository.ExtensionRuntimeRepository
@@ -115,6 +118,21 @@ class ExtensionRuntimeRepositoryImpl(
                     runtimeKind = runtime.runtimeKind,
                     isRuntimeExecutable = runtime.isExecutable,
                     runtimeMessage = runtime.runtimeMessage,
+                )
+            }
+
+            if (loaded.none { source -> source.extensionId == LOCAL_CBZ_SOURCE_ID }) {
+                loaded += LoadedSource(
+                    extensionId = LOCAL_CBZ_SOURCE_ID,
+                    sourceId = LOCAL_CBZ_SOURCE_ID,
+                    name = LOCAL_CBZ_SOURCE_NAME,
+                    language = "all",
+                    supportsNsfw = true,
+                    baseUrl = LOCAL_CBZ_SOURCE_BASE_URL,
+                    localFilePath = "",
+                    runtimeKind = SourceRuntimeKind.UNKNOWN,
+                    isRuntimeExecutable = false,
+                    runtimeMessage = null,
                 )
             }
 
