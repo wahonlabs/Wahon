@@ -81,14 +81,7 @@ fun MoreScreen() {
     var mixedDirectoryImportInProgress by remember { mutableStateOf(false) }
     var mixedDirectoryStatus by remember { mutableStateOf<String?>(null) }
     val isIosPlatform = platformName.startsWith("iOS", ignoreCase = true)
-    val dohNote = buildString {
-        append("Current: ${dohProvider.displayName()}. Tap to switch.")
-        if (isIosPlatform) {
-            append(" iOS DoH backend is not implemented yet.")
-        } else {
-            append(" Applies immediately for new requests.")
-        }
-    }
+    val dohNote = "Current: ${dohProvider.displayName()}. Tap to switch. Applies immediately for new requests."
 
     Column(
         modifier = Modifier
